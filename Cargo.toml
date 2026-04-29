@@ -1,0 +1,54 @@
+[package]
+name = "attest"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+description = "TEE attestation generation, verification, and measurement"
+repository = "https://github.com/flashbots/attest"
+keywords = ["attestation", "CVM", "TDX"]
+
+[[bin]]
+name = "attest"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["sync"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+sha2 = "0.10"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }
+parity-scale-codec = { version = "3", features = ["derive"] }
+object = { version = "0.37", default-features = false, features = ["pe", "read"] }
+serde_with = { version = "3", features = ["hex"] }
+authenticode = { version = "0.5.0", features = ["object", "std"] }
+hex = "0.4"
+hex-literal = "1"
+crc32fast = "1"
+
+az-tdx-vtpm = { version = "0.8", optional = true }
+tss-esapi = { version = "7.6", optional = true }
+openssl = { version = "0.10", optional = true }
+tdx-quote = { version = "0.0.5", features = ["mock"], optional = true }
+tdx_attest = { version = "0.1", optional = true }
+
+
+[dev-dependencies]
+tempfile = "3"
+tdx-quote = { version = "0.0.5", features = ["mock"] }
+
+[features]
+default = []
+azure = ["tss-esapi", "az-tdx-vtpm", "openssl"]
+mock = ["tdx-quote"]
+
+[lints.rust]
+unreachable_pub = "deny"
+
+[lints.clippy]
+manual_let_else = "warn"
+match_same_arms = "warn"
+uninlined_format_args = "warn"
+unused_async = "warn"
