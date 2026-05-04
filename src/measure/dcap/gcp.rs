@@ -96,3 +96,77 @@ pub fn build_rtmr1(hashes: &DcapImageHashes) -> Register<Sha384> {
     mr.extend(EXIT_BOOT_SERVICES_SUCCESS, "exit boot services success");
     mr
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::measure::dcap::build_rtmr2;
+    use crate::platform_events::{firmware_mrtds, machine_configs};
+
+    /// Image hashes from a build of flashbox-l1
+    fn supplied_image_hashes() -> DcapImageHashes {
+        DcapImageHashes {
+            cmdline_hash: hex!(
+                "e03b89abf354a38976537b7a9138fd312e4cbf73b61eebc44086491701b1d167b9f6cb97a922325866c93e0834723d87"
+            ),
+            gpt_disk_guid_hash: hex!(
+                "a3a41b0f933aec447be266dec5f907c2b0ba89afbc3f4f7378f0dca844969cbfca324ed64f1720da6e9d4484fda4f9da"
+            ),
+            initrd_hash: hex!(
+                "305d9b8e2ce9b62bda924a990eed5234c8441882ba2cd603a427b1ac4180124bf1a49a4b49eae1796983ad608a4da666"
+            ),
+            kernel_authenticode: hex!(
+                "b6c5133268aa8b440509f3d53ee855a5cd3aeb6441eb109a9f27f14c43bce3e2383856df4af876501ceeb4c9a3b15f0c"
+            ),
+            uki_authenticode: hex!(
+                "9b678ccbad7fc2f3935e3e760cf8daedd6e3e3e5a327e72ee9473399b7effac6bb5590002ed73a53f6b3a97d296852e2"
+            ),
+        }
+    }
+    /// Register values observed on a GCP deployment with that image
+    const OBSERVED_MRTD: [u8; 48] = hex!(
+        "feb7486608382c1ff0e15b4648ddc0acea6ca974eb53e3529f4c4bd5ffbaa20bf335cb75965cea65fe473aed9647c162"
+    );
+    const OBSERVED_RTMR0: [u8; 48] = hex!(
+        "e1d0235496f93f9475bf0b26d33da5c15831cfc94104d6bea7ab82db027c5f1e917d47dda6953eefae7dcb20ab6f75c4"
+    );
+    const OBSERVED_RTMR1: [u8; 48] = hex!(
+        "2bd4946acfa6ccc29f9efa08a78fd5ace02194d0bc38d056003d2937c216e0de08dba010a661c4b344756234f08a4cf2"
+    );
+    const OBSERVED_RTMR2: [u8; 48] = hex!(
+        "4ae34b6b64c2a618c7ee61f488219fcd8383d149ad7e44606616598d73bd3f7a2f20846d780463278715433d9813af2c"
+    );
+    /// SHA384 hash of GCP OVMF firmware associated with observed MRTD
+    const OBSERVED_CFV_IMAGE_HASH: [u8; 48] = hex!(
+        "9cb6bf09aea7b4acb8549e328d0edd6f15defc0b00d744bb9fb5bab0962bc5c70f69d233e96dbc7c1105ba085781dc88"
+    );
+
+    #[test]
+    fn captured_quote_mrtd_is_a_known_gcp_firmware_measurement() {
+        assert!(
+            firmware_mrtds().iter().any(|fw| fw.mrtd == OBSERVED_MRTD),
+            "Observed quote MRTD is not present in mrtds.json"
+        );
+    }
+
+    #[test]
+    fn builds_image_dependent_registers_from_supplied_hashes() {
+        let hashes = supplied_image_hashes();
+
+        assert_eq!(build_rtmr1(&hashes).value(), OBSERVED_RTMR1);
+        assert_eq!(build_rtmr2(&hashes).value(), OBSERVED_RTMR2);
+    }
+
+    #[test]
+    fn builds_rtmr0_from_known_gcp_firmware_and_machine_config() {
+        let machine = machine_configs()
+            .iter()
+            .find(|m| m.name == "c3-standard-4")
+            .unwrap();
+
+        assert_eq!(
+            build_rtmr0(machine, OBSERVED_CFV_IMAGE_HASH).value(),
+            OBSERVED_RTMR0
+        );
+    }
+}
