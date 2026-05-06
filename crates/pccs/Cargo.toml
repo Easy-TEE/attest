@@ -3,10 +3,29 @@ name = "attest-pccs"
 version = "0.0.1"
 edition = "2024"
 license = "MIT"
-description = "Provisioning Certificate Caching Service for Intel TDX"
+description = "Provisioning Certificate Caching Service with pre-emptive fetching"
 repository = "https://github.com/flashbots/attest"
 
 [dependencies]
+tokio = { workspace = true }
+time = { version = "0.3.44", features = ["parsing", "formatting"] }
+dcap-qvl = { workspace = true }
+tracing = "0.1.41"
+thiserror = "2.0.17"
+serde = "1.0.228"
+serde_json = "1.0.145"
+anyhow = "1.0.100"
+reqwest = { version = "0.12.23", default-features = false, features = [
+  "rustls-tls-webpki-roots-no-provider",
+] }
+x509-parser = "0.18.0"
+
+[dev-dependencies]
+axum = "0.8.6"
+hex = "0.4.3"
+rcgen = "0.14.5"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
+serde-saphyr = "0.0.22"
 
 [lints]
 workspace = true

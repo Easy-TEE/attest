@@ -23,3 +23,6 @@ measure = { path = "crates/measure", package = "attest-measure" }
 prove = { path = "crates/prove", package = "attest-prove" }
 verify = { path = "crates/verify", package = "attest-verify" }
 pccs = { path = "crates/pccs", package = "attest-pccs" }
+
+dcap-qvl = { git = "https://github.com/Phala-Network/dcap-qvl.git", rev = "f1dcc65371e941a7b83e3234833d23a1fb232ab1" }
+tokio = { version = "1.50.0", features = ["default"] }
