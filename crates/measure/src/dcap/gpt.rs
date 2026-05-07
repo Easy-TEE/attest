@@ -1,7 +1,6 @@
 //! GPT disk-GUID hash construction for the EV_EFI_GPT_EVENT measurement
 //!
-//! Sizes are derived from the UKI byte length the same way mkosi.postoutput
-//! does
+//! Sizes are derived from the UKI byte length (same as mkosi.postoutput)
 
 use sha2::{Digest, Sha384};
 
@@ -33,6 +32,7 @@ pub(super) fn disk_guid_hash(uki_size: u64) -> [u8; 48] {
     partition_array[..128].copy_from_slice(&partition);
     let partition_array_crc = crc32fast::hash(&partition_array);
 
+    // Hash header with CRC zeroed out, then write it into the header
     let mut header = build_header(disk_size_sectors, partition_array_crc);
     let header_crc = crc32fast::hash(&header);
     header[16..20].copy_from_slice(&header_crc.to_le_bytes());
@@ -46,8 +46,7 @@ pub(super) fn disk_guid_hash(uki_size: u64) -> [u8; 48] {
     Sha384::digest(&blob).into()
 }
 
-/// 92-byte GPT primary header with HeaderCRC32 left zero (caller patches it
-/// in)
+/// 92-byte GPT primary header with empty HeaderCRC32
 fn build_header(disk_size_sectors: u64, partition_array_crc: u32) -> Vec<u8> {
     let mut h = Vec::with_capacity(92);
     h.extend_from_slice(b"EFI PART"); // Signature
@@ -89,8 +88,9 @@ fn build_partition(esp_ending_lba: u64) -> Vec<u8> {
     p
 }
 
-/// Encode a UEFI mixed-endian GUID: first three groups little-endian, last
-/// two big-endian
+/// Encode a UEFI mixed-endian GUID
+/// First three groups are little-endian
+/// Last two big-endian
 fn encode_guid(s: &str) -> [u8; 16] {
     let mut out = [0u8; 16];
     let mut idx = 0;

@@ -12,8 +12,7 @@ use sha2::{Digest, Sha384};
 const FW_GUID_TABLE_OFFSET_FROM_END: usize = 0x20;
 const FW_GUID_ENTRY_SIZE: usize = 18; // u16 size + 16-byte GUID
 
-/// GUID identifying the TDX metadata offset entry in the firmware footer
-/// table
+/// GUID identifying TDX metadata offset entry in firmware footer table
 const TDX_METADATA_OFFSET_GUID: &str = "e47a6535-984a-4798-865e-4685a7bf8ec2";
 
 const SECTION_TYPE_CFV: u32 = 1;
@@ -89,8 +88,7 @@ fn tdx_metadata_offset(fw: &[u8]) -> Result<usize> {
     Ok(u32::from_le_bytes(entry[..4].try_into().unwrap()) as usize)
 }
 
-/// Scans the firmware footer GUID table backward to build a map of GUID ->
-/// data bytes
+/// Scans the firmware footer GUID table backward to build GUID -> data map
 fn parse_guid_map(fw: &[u8]) -> Result<HashMap<String, Vec<u8>>> {
     let table = parse_guid_table(fw)?;
     let mut map = HashMap::new();

@@ -19,8 +19,8 @@ use crate::{
     },
 };
 
-// SHA-384 of the EV_EFI_VARIABLE_DRIVER_CONFIG events for GCP's TDX
-// firmware TODO: don't hardcode these
+// SHA-384 of the GCP EV_EFI_VARIABLE_DRIVER_CONFIG events
+// TODO: don't hardcode these
 pub const SECURE_BOOT_HASH: [u8; 48] = hex!(
     "CFA4E2C606F572627BF06D5669CC2AB1128358D27B45BC63EE9EA56EC109CFAFB7194006F847A6A74B5EAED6B73332EC"
 );
@@ -66,11 +66,9 @@ pub fn measure(hashes: &DcapImageHashes, configs: &[String]) -> Result<DcapRegis
     })
 }
 
-/// RTMR0: platform events (firmware, ACPI, boot order), does not depend on
-/// the image
+/// RTMR0: firmware and platform measurements (doesn't depend on image)
 ///
-/// `cfv_image_hash` is the SHA-384 of the OVMF Configuration Firmware
-/// Volume
+/// `cfv_image_hash` is the hash of the OVMF Configuration Firmware Volume
 pub fn build_rtmr0(machine: &MachineConfig, cfv_image_hash: [u8; 48]) -> Register<Sha384> {
     let mut mr = Register::new();
     mr.extend_raw(machine.td_hob_hash, "TD HOB");
@@ -91,7 +89,7 @@ pub fn build_rtmr0(machine: &MachineConfig, cfv_image_hash: [u8; 48]) -> Registe
     mr
 }
 
-/// RTMR1 on GCP
+/// RTMR1: GCP-specific image measurements (depends on image)
 pub fn build_rtmr1(hashes: &DcapImageHashes) -> Register<Sha384> {
     let mut mr = Register::new();
     mr.extend(CALLING_EFI_APP, "calling EFI app");

@@ -2,6 +2,7 @@
 resolver = "3"
 
 members = [
+    "crates/types",
     "crates/measure",
     "crates/prove",
     "crates/verify",
@@ -19,6 +20,7 @@ uninlined_format_args = "warn"
 unused_async = "warn"
 
 [workspace.dependencies]
+types = { path = "crates/types", package = "attest-types" }
 measure = { path = "crates/measure", package = "attest-measure" }
 prove = { path = "crates/prove", package = "attest-prove" }
 verify = { path = "crates/verify", package = "attest-verify" }

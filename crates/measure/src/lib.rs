@@ -1,24 +1,29 @@
+//! Computes expected values from a CVM running the specified image
+
 pub mod azure;
 pub mod dcap;
 pub mod event;
 pub mod platform_events;
-pub mod types;
 pub mod uki;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use types::PortableMeasurements;
 
-use self::{azure::AzureRegisters, dcap::DcapImageHashes, uki::Uki};
+use self::uki::Uki;
 
-/// Default output of the `measure` command
-/// Contains the image-dependent DCAP event hashes and the final Azure PCRs
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PortableMeasurements {
-    pub azure: AzureRegisters,
-    pub dcap: DcapImageHashes,
+/// A computed measurement with both an annotated form
+/// and a form with only the final digest values
+pub trait Measurement {
+    type Wire: Serialize;
+    fn finalize(&self) -> Self::Wire;
+    fn debug_json(&self) -> serde_json::Value;
 }
 
 /// Produces a portable measurement from a UKI file
 pub fn measure(uki_data: &[u8]) -> anyhow::Result<PortableMeasurements> {
     let uki = Uki::parse(uki_data)?;
-    Ok(PortableMeasurements { azure: azure::measure(&uki), dcap: dcap::measure(&uki) })
+    Ok(PortableMeasurements {
+        azure: Some(azure::measure(&uki).finalize()),
+        dcap: dcap::measure(&uki),
+    })
 }

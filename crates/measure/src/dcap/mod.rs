@@ -7,45 +7,42 @@ pub mod self_hosted;
 mod gpt;
 mod tdvf;
 
-use serde::{Deserialize, Serialize};
-use serde_with::hex::Hex;
+use serde::Serialize;
 use sha2::{Digest, Sha384};
+pub use types::DcapImageHashes;
 
 use super::{
+    Measurement,
     event::Register,
     uki::{Uki, to_utf16le_null_terminated},
 };
-
-/// Portable image-specific hashes for DCAP platforms
-/// The verifier combines these with platform events at runtime to
-/// reconstruct RTMRs
-#[serde_with::apply([u8; 48] => #[serde_as(as = "Hex")])]
-#[serde_with::serde_as]
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DcapImageHashes {
-    pub uki_authenticode: [u8; 48],
-    pub kernel_authenticode: [u8; 48],
-    pub cmdline_hash: [u8; 48],
-    pub initrd_hash: [u8; 48],
-    pub gpt_disk_guid_hash: [u8; 48],
-}
 
 /// Full DCAP register values (GCP or self-hosted)
 /// RTMRs are `Vec`s to support multiple valid values (e.g. GCP firmware
 /// variants)
 #[serde_with::serde_as]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 pub struct DcapRegisters {
-    #[serde_as(as = "Vec<Hex>")]
+    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
     pub mrtd: Vec<[u8; 48]>,
     pub rtmr0: Vec<Register<Sha384>>,
     pub rtmr1: Vec<Register<Sha384>>,
     pub rtmr2: Vec<Register<Sha384>>,
 }
 
-impl DcapRegisters {
-    /// Event list for `--debug` output
-    pub fn debug_json(&self) -> serde_json::Value {
+impl Measurement for DcapRegisters {
+    type Wire = types::DcapRegisters;
+
+    fn finalize(&self) -> Self::Wire {
+        types::DcapRegisters {
+            mrtd: self.mrtd.clone(),
+            rtmr0: self.rtmr0.iter().map(Register::value).collect(),
+            rtmr1: self.rtmr1.iter().map(Register::value).collect(),
+            rtmr2: self.rtmr2.iter().map(Register::value).collect(),
+        }
+    }
+
+    fn debug_json(&self) -> serde_json::Value {
         let verbose = |rs: &[Register<Sha384>]| -> Vec<serde_json::Value> {
             rs.iter().map(Register::debug_json).collect()
         };

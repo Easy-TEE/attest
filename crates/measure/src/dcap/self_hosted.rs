@@ -2,11 +2,15 @@
 
 use anyhow::Result;
 use sha2::Sha384;
+use types::PlatformMetadata;
 
 use super::{DcapImageHashes, DcapRegisters};
-use crate::{
-    event::{CALLING_EFI_APP, EXIT_BOOT_SERVICES, EXIT_BOOT_SERVICES_SUCCESS, Register, SEPARATOR},
-    types::PlatformMetadata,
+use crate::event::{
+    CALLING_EFI_APP,
+    EXIT_BOOT_SERVICES,
+    EXIT_BOOT_SERVICES_SUCCESS,
+    Register,
+    SEPARATOR,
 };
 
 /// Full self-hosted TDX measurement
@@ -19,7 +23,7 @@ pub fn measure(
     todo!()
 }
 
-/// RTMR1 on self-hosted TDX
+/// Generated RTMR1 for self-hosted TDX image
 pub fn build_rtmr1(hashes: &DcapImageHashes) -> Register<Sha384> {
     let mut mr = Register::new();
     mr.extend_raw(hashes.kernel_authenticode, "kernel authenticode");

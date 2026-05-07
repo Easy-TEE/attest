@@ -134,22 +134,3 @@ impl<H: HashAlg> Serialize for Register<H> {
         hex::encode(self.value.as_ref()).serialize(ser)
     }
 }
-
-/// Deserializes from a hex string (empty event log)
-impl<'de, H: HashAlg> Deserialize<'de> for Register<H> {
-    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(de)?;
-        let bytes = hex::decode(&s).map_err(serde::de::Error::custom)?;
-        let mut arr = H::zero();
-        let slice = arr.as_mut();
-        if bytes.len() != slice.len() {
-            return Err(serde::de::Error::custom(format!(
-                "expected {} bytes, got {}",
-                slice.len(),
-                bytes.len()
-            )));
-        }
-        slice.copy_from_slice(&bytes);
-        Ok(Self { value: arr, events: Vec::new(), _h: PhantomData })
-    }
-}

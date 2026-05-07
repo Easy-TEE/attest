@@ -1,23 +1,33 @@
 //! Azure vTPM PCR measurement
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::Sha256;
 
 use super::{
+    Measurement,
     event::{CALLING_EFI_APP, Register, SEPARATOR},
     uki::{Uki, to_utf16le_null_terminated},
 };
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 pub struct AzureRegisters {
     pub pcr4: Register<Sha256>,
     pub pcr9: Register<Sha256>,
     pub pcr11: Register<Sha256>,
 }
 
-impl AzureRegisters {
-    /// Event list for `--debug` output
-    pub fn debug_json(&self) -> serde_json::Value {
+impl Measurement for AzureRegisters {
+    type Wire = types::AzureRegisters;
+
+    fn finalize(&self) -> Self::Wire {
+        types::AzureRegisters {
+            pcr4: self.pcr4.value(),
+            pcr9: self.pcr9.value(),
+            pcr11: self.pcr11.value(),
+        }
+    }
+
+    fn debug_json(&self) -> serde_json::Value {
         serde_json::json!({
             "pcr4": self.pcr4.debug_json(),
             "pcr9": self.pcr9.debug_json(),

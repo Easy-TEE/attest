@@ -1,0 +1,119 @@
+//! Types shared between the prove, verify, and measure crates
+
+use std::fmt;
+
+use parity_scale_codec::{Decode, Encode};
+use serde::{Deserialize, Serialize};
+use serde_with::hex::Hex;
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AttestationType {
+    #[default]
+    None,
+    GcpTdx,
+    AzureTdx,
+    SelfHostedTdx,
+}
+
+impl AttestationType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::GcpTdx => "gcp-tdx",
+            Self::AzureTdx => "azure-tdx",
+            Self::SelfHostedTdx => "self-hosted-tdx",
+        }
+    }
+}
+
+impl fmt::Display for AttestationType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Encode for AttestationType {
+    fn encode(&self) -> Vec<u8> {
+        self.as_str().encode()
+    }
+}
+
+impl Decode for AttestationType {
+    fn decode<I: parity_scale_codec::Input>(
+        input: &mut I,
+    ) -> Result<Self, parity_scale_codec::Error> {
+        let s = String::decode(input)?;
+        serde_json::from_str(&format!("\"{s}\"")).map_err(|_| "unknown attestation type".into())
+    }
+}
+
+/// Additional platform information used to reconstruct registers
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+pub struct PlatformMetadata {
+    pub attestation_type: AttestationType,
+    pub vcpus: u32,
+    pub ram_bytes: u64,
+    pub num_disks: u32,
+}
+
+/// Output of `prove` function
+/// Raw quote bytes plus info needed to reconstruct registers
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+pub struct AttestationEvidence {
+    pub quote: Vec<u8>,
+    pub platform: PlatformMetadata,
+}
+
+/// Final Azure vTPM PCR values
+#[serde_with::apply([u8; 32] => #[serde_as(as = "Hex")])]
+#[serde_with::serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AzureRegisters {
+    pub pcr4: [u8; 32],
+    pub pcr9: [u8; 32],
+    pub pcr11: [u8; 32],
+}
+
+/// Image-specific intermediate hashes for DCAP platforms
+/// Combined with platform events at verify time to reconstruct RTMRs
+#[serde_with::apply([u8; 48] => #[serde_as(as = "Hex")])]
+#[serde_with::serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DcapImageHashes {
+    pub uki_authenticode: [u8; 48],
+    pub kernel_authenticode: [u8; 48],
+    pub cmdline_hash: [u8; 48],
+    pub initrd_hash: [u8; 48],
+    pub gpt_disk_guid_hash: [u8; 48],
+}
+
+/// Full DCAP register values. Each field is a list of valid alternatives
+/// (e.g. multiple firmware versions accepted)
+#[serde_with::apply(Vec<[u8; 48]> => #[serde_as(as = "Vec<Hex>")])]
+#[serde_with::serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DcapRegisters {
+    pub mrtd: Vec<[u8; 48]>,
+    pub rtmr0: Vec<[u8; 48]>,
+    pub rtmr1: Vec<[u8; 48]>,
+    pub rtmr2: Vec<[u8; 48]>,
+}
+
+/// Contains only measurement values that depend on the image
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortableMeasurements {
+    pub azure: Option<AzureRegisters>,
+    pub dcap: DcapImageHashes,
+}
+
+/// Output of `attest measure` command
+/// Contains expected measurements for use by verify function
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[allow(clippy::large_enum_variant)]
+pub enum MeasurementOutput {
+    Portable(PortableMeasurements),
+    Dcap(DcapRegisters),
+    Azure(AzureRegisters),
+}
