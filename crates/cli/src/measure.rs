@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Subcommand;
 use measure::{Measurement, uki::Uki};
 use serde_json::{Value, to_string_pretty, to_value};
-use types::{AttestationType, MeasurementOutput, PlatformMetadata, PortableMeasurements};
+use types::{MeasurementOutput, PortableMeasurements};
 
 #[derive(Subcommand)]
 pub(crate) enum Target {
@@ -40,8 +40,6 @@ pub(crate) enum Target {
         /// Firmware file
         #[arg(long)]
         firmware: PathBuf,
-        #[arg(long, default_value_t = 1)]
-        vcpus: u32,
         /// RAM size (e.g. "2G" or "512M")
         #[arg(long, default_value = "2G", value_parser = parse_ram)]
         ram: u64,
@@ -66,17 +64,11 @@ pub(crate) fn run(target: Target) -> Result<()> {
             let hashes = measure::dcap::measure(&load_uki(&uki)?);
             emit(measure::dcap::gcp::measure(&hashes, &configs)?, debug, MeasurementOutput::Dcap)?
         }
-        Target::SelfHosted { uki, firmware, vcpus, ram, debug } => {
+        Target::SelfHosted { uki, firmware, ram, debug } => {
             let hashes = measure::dcap::measure(&load_uki(&uki)?);
             let fw = std::fs::read(&firmware)?;
-            let platform = PlatformMetadata {
-                attestation_type: AttestationType::SelfHostedTdx,
-                vcpus,
-                ram_bytes: ram,
-                num_disks: 0,
-            };
             emit(
-                measure::dcap::self_hosted::measure(&hashes, &fw, &platform)?,
+                measure::dcap::self_hosted::measure(&hashes, &fw, ram)?,
                 debug,
                 MeasurementOutput::Dcap,
             )?

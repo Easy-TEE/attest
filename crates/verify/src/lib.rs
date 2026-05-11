@@ -80,11 +80,7 @@ pub fn verify_dcap_at(
     time: u64,
 ) -> Result<[u8; 64], VerifyError> {
     let raw = dcap::validate_quote_at(quote, pccs, time)?;
-    if !expected.mrtd.contains(&raw.mrtd) ||
-        !expected.rtmr0.contains(&raw.rtmr0) ||
-        !expected.rtmr1.contains(&raw.rtmr1) ||
-        !expected.rtmr2.contains(&raw.rtmr2)
-    {
+    if expected.rtmr1 != raw.rtmr1 || expected.rtmr2 != raw.rtmr2 {
         return Err(VerifyError::RegisterMismatch);
     }
     Ok(raw.report_data)

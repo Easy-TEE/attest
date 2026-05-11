@@ -48,13 +48,23 @@ impl Decode for AttestationType {
     }
 }
 
+/// Hashes of ACPI tables. These tables are sandboxed on Easy-TEE images
+#[serde_with::apply([u8; 48] => #[serde_as(as = "Hex")])]
+#[serde_with::serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
+pub struct AcpiHashes {
+    pub loader: [u8; 48],
+    pub rsdp: [u8; 48],
+    pub tables: [u8; 48],
+}
+
 /// Additional platform information used to reconstruct registers
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub struct PlatformMetadata {
     pub attestation_type: AttestationType,
-    pub vcpus: u32,
     pub ram_bytes: u64,
     pub num_disks: u32,
+    pub acpi: AcpiHashes,
 }
 
 /// Output of `prove` function
@@ -88,16 +98,14 @@ pub struct DcapImageHashes {
     pub gpt_disk_guid_hash: [u8; 48],
 }
 
-/// Full DCAP register values. Each field is a list of valid alternatives
-/// (e.g. multiple firmware versions accepted)
-#[serde_with::apply(Vec<[u8; 48]> => #[serde_as(as = "Vec<Hex>")])]
+/// Image-dependent DCAP register values
+/// MRTD and RTMR0 must be reconstructed or verified separately
+#[serde_with::apply([u8; 48] => #[serde_as(as = "Hex")])]
 #[serde_with::serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DcapRegisters {
-    pub mrtd: Vec<[u8; 48]>,
-    pub rtmr0: Vec<[u8; 48]>,
-    pub rtmr1: Vec<[u8; 48]>,
-    pub rtmr2: Vec<[u8; 48]>,
+    pub rtmr1: [u8; 48],
+    pub rtmr2: [u8; 48],
 }
 
 /// Contains only measurement values that depend on the image

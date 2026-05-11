@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use sha2::Sha384;
-use types::PlatformMetadata;
 
 use super::{DcapImageHashes, DcapRegisters};
 use crate::event::{
@@ -17,7 +16,7 @@ use crate::event::{
 pub fn measure(
     _hashes: &DcapImageHashes,
     _firmware: &[u8],
-    _platform: &PlatformMetadata,
+    _ram_bytes: u64,
 ) -> Result<DcapRegisters> {
     // TODO: compute for td-shim?
     todo!()

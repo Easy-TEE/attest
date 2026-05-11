@@ -2,7 +2,7 @@
 
 use std::process::Command;
 
-use types::{AttestationType, PlatformMetadata};
+use types::{AcpiHashes, AttestationType, PlatformMetadata};
 
 use crate::ProveError;
 
@@ -10,9 +10,9 @@ use crate::ProveError;
 pub fn metadata() -> Result<PlatformMetadata, ProveError> {
     Ok(PlatformMetadata {
         attestation_type: detect()?,
-        vcpus: vcpus()?,
         ram_bytes: ram_bytes()?,
         num_disks: num_disks()?,
+        acpi: AcpiHashes { loader: [0; 48], rsdp: [0; 48], tables: [0; 48] }, // TODO
     })
 }
 
@@ -27,11 +27,6 @@ pub fn detect() -> Result<AttestationType, ProveError> {
         "none" => return Err(ProveError::NotInTee),
         other => return Err(ProveError::UnknownPlatform(other.to_string())),
     })
-}
-
-fn vcpus() -> Result<u32, ProveError> {
-    let n = std::thread::available_parallelism()?.get();
-    Ok(u32::try_from(n).unwrap_or(u32::MAX))
 }
 
 fn ram_bytes() -> Result<u64, ProveError> {

@@ -5,6 +5,7 @@ pub mod gcp;
 pub mod self_hosted;
 
 mod gpt;
+#[allow(dead_code)]
 mod tdvf;
 
 use serde::Serialize;
@@ -17,40 +18,24 @@ use super::{
     uki::{Uki, to_utf16le_null_terminated},
 };
 
-/// Full DCAP register values (GCP or self-hosted)
-/// RTMRs are `Vec`s to support multiple valid values (e.g. GCP firmware
-/// variants)
-#[serde_with::serde_as]
+/// Image-dependent DCAP register values
 #[derive(Debug, Serialize)]
 pub struct DcapRegisters {
-    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
-    pub mrtd: Vec<[u8; 48]>,
-    pub rtmr0: Vec<Register<Sha384>>,
-    pub rtmr1: Vec<Register<Sha384>>,
-    pub rtmr2: Vec<Register<Sha384>>,
+    pub rtmr1: Register<Sha384>,
+    pub rtmr2: Register<Sha384>,
 }
 
 impl Measurement for DcapRegisters {
     type Wire = types::DcapRegisters;
 
     fn finalize(&self) -> Self::Wire {
-        types::DcapRegisters {
-            mrtd: self.mrtd.clone(),
-            rtmr0: self.rtmr0.iter().map(Register::value).collect(),
-            rtmr1: self.rtmr1.iter().map(Register::value).collect(),
-            rtmr2: self.rtmr2.iter().map(Register::value).collect(),
-        }
+        types::DcapRegisters { rtmr1: self.rtmr1.value(), rtmr2: self.rtmr2.value() }
     }
 
     fn debug_json(&self) -> serde_json::Value {
-        let verbose = |rs: &[Register<Sha384>]| -> Vec<serde_json::Value> {
-            rs.iter().map(Register::debug_json).collect()
-        };
         serde_json::json!({
-            "mrtd": self.mrtd.iter().map(hex::encode).collect::<Vec<_>>(),
-            "rtmr0": verbose(&self.rtmr0),
-            "rtmr1": verbose(&self.rtmr1),
-            "rtmr2": verbose(&self.rtmr2),
+            "rtmr1": self.rtmr1.debug_json(),
+            "rtmr2": self.rtmr2.debug_json(),
         })
     }
 }
