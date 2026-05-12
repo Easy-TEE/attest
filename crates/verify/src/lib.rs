@@ -3,10 +3,10 @@
 #[cfg(feature = "azure")]
 pub mod azure;
 pub mod dcap;
+pub mod gcp;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use measure::Measurement;
 use pccs::Pccs;
 use thiserror::Error;
 #[cfg(feature = "azure")]
@@ -34,8 +34,7 @@ pub fn verify_at(
 ) -> Result<[u8; 64], VerifyError> {
     match (expected, evidence.platform.attestation_type) {
         (MeasurementOutput::Portable(p), AttestationType::GcpTdx) => {
-            let expected_dcap = measure::dcap::gcp::measure(&p.dcap).finalize();
-            verify_dcap_at(&expected_dcap, &evidence.quote, pccs, time)
+            gcp::verify_portable(&p.dcap, &evidence.platform, &evidence.quote, pccs, time)
         }
         (MeasurementOutput::Portable(_), AttestationType::SelfHostedTdx) => {
             Err(VerifyError::SelfHostedRebuildNotImplemented)
@@ -120,6 +119,8 @@ pub enum VerifyError {
     PlatformMismatch,
     #[error("Quote register values do not match any expected entry")]
     RegisterMismatch,
+    #[error("Platform metadata is missing ACPI hashes")]
+    MissingAcpi,
     #[error("Self-hosted register reconstruction is not yet implemented")]
     SelfHostedRebuildNotImplemented,
     #[cfg(not(feature = "azure"))]

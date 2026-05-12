@@ -273,6 +273,7 @@ dependencies = [
  "base64 0.22.1",
  "dcap-qvl",
  "hex",
+ "hex-literal",
  "num-bigint",
  "once_cell",
  "openssl",

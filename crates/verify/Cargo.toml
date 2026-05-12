@@ -15,6 +15,7 @@ pccs = { workspace = true }
 anyhow = "1"
 dcap-qvl = { workspace = true }
 hex = "0.4"
+hex-literal = "1"
 thiserror = "2"
 
 # Used for azure vTPM attestation verification support

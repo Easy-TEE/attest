@@ -1,9 +1,11 @@
 //! GCP TDX measurement
 
+use anyhow::{Result, ensure};
 use hex_literal::hex;
 use sha2::Sha384;
+use types::AcpiHashes;
 
-use super::{DcapImageHashes, DcapRegisters, build_rtmr2};
+use super::{DcapImageHashes, DcapRegisters, build_rtmr2, secure_boot, td_hob};
 use crate::event::{
     CALLING_EFI_APP,
     EXIT_BOOT_SERVICES,
@@ -34,6 +36,35 @@ pub fn boot_order_bytes(num_disks: u32) -> Vec<u8> {
 /// GCP RTMR1 and RTMR2 measurements
 pub fn measure(hashes: &DcapImageHashes) -> DcapRegisters {
     DcapRegisters { rtmr1: build_rtmr1(hashes), rtmr2: build_rtmr2(hashes) }
+}
+
+/// RTMR0: GCP-specific platform measurements (independent of image)
+pub fn build_rtmr0(
+    ram_bytes: u64,
+    cfv: [u8; 48],
+    acpi: &AcpiHashes,
+    num_disks: u32,
+) -> Result<Register<Sha384>> {
+    ensure!(num_disks <= 1, "num_disks > 1 not yet supported"); // TODO
+    let mut mr = Register::new();
+    mr.extend_raw(td_hob::digest(ram_bytes)?, "TD HOB");
+    mr.extend_raw(cfv, "CFV image");
+    mr.extend_raw(secure_boot::secureboot_off(), "secure boot");
+    mr.extend_raw(secure_boot::pk(), "PK");
+    mr.extend_raw(secure_boot::kek(), "KEK");
+    mr.extend_raw(secure_boot::db(), "db");
+    mr.extend_raw(secure_boot::dbx(), "dbx");
+    mr.extend(SEPARATOR, "separator");
+    mr.extend_raw(acpi.loader, "ACPI loader");
+    mr.extend_raw(acpi.rsdp, "ACPI RSDP");
+    mr.extend_raw(acpi.tables, "ACPI tables");
+    mr.extend(&boot_order_bytes(num_disks), "boot order");
+    mr.extend_raw(BOOT_0001_HASH, "boot 0001");
+    if num_disks >= 1 {
+        mr.extend_raw(BOOT_0002_HASH, "boot 0002");
+    }
+    mr.extend_raw(BOOT_0000_HASH, "boot 0000");
+    Ok(mr)
 }
 
 /// RTMR1: GCP-specific image measurements (depends on image)
