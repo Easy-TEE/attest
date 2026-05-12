@@ -3,7 +3,6 @@
 pub mod azure;
 pub mod dcap;
 pub mod event;
-pub mod platform_events;
 pub mod uki;
 
 use serde::Serialize;

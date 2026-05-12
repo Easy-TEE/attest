@@ -15,7 +15,6 @@ serde_json = "1"
 serde_with = { version = "3", features = ["hex"] }
 anyhow = "1"
 sha2 = "0.10"
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }
 object = { version = "0.37", default-features = false, features = ["pe", "read"] }
 authenticode = { version = "0.5.0", features = ["object", "std"] }
 hex = "0.4"
