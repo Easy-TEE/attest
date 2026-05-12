@@ -2,6 +2,7 @@
 //! etc)
 
 pub mod gcp;
+pub mod secure_boot;
 pub mod self_hosted;
 pub mod td_hob;
 

@@ -14,6 +14,7 @@ group_imports = "StdExternalCrate"
 imports_granularity = "Crate"
 imports_layout = "HorizontalVertical"
 reorder_imports = true
+skip_macro_invocations = ["hex"]
 trailing_comma = "Vertical"
 trailing_semicolon = false
 use_field_init_shorthand = true
