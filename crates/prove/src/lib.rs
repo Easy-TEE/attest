@@ -2,6 +2,7 @@
 
 #[cfg(feature = "azure")]
 pub mod azure;
+pub mod ccel;
 pub mod platform;
 
 use thiserror::Error;
@@ -40,6 +41,8 @@ pub enum ProveError {
     Io(#[from] std::io::Error),
     #[error("Parsing /proc/meminfo")]
     MemInfoParse,
+    #[error("CCEL: {0:#}")]
+    Ccel(anyhow::Error),
     #[cfg(feature = "azure")]
     #[error("Azure: {0}")]
     Azure(#[from] azure::AzureError),

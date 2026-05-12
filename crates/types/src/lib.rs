@@ -64,7 +64,7 @@ pub struct PlatformMetadata {
     pub attestation_type: AttestationType,
     pub ram_bytes: u64,
     pub num_disks: u32,
-    pub acpi: AcpiHashes,
+    pub acpi: Option<AcpiHashes>,
 }
 
 /// Output of `prove` function

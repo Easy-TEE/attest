@@ -11,6 +11,7 @@ keywords = ["attestation", "CVM", "TDX"]
 types = { workspace = true }
 
 thiserror = "2"
+anyhow = "1"
 tdx-attest = { git = "https://github.com/Dstack-TEE/dstack.git", rev = "4f602dddc0542cd34da031c90ac0b3a560f316ed" }
 
 # Used for azure vTPM attestation generation support

@@ -2,18 +2,20 @@
 
 use std::process::Command;
 
-use types::{AcpiHashes, AttestationType, PlatformMetadata};
+use types::{AttestationType, PlatformMetadata};
 
-use crate::ProveError;
+use crate::{ProveError, ccel};
 
 /// Identify the host platform and read system specs
 pub fn metadata() -> Result<PlatformMetadata, ProveError> {
-    Ok(PlatformMetadata {
-        attestation_type: detect()?,
-        ram_bytes: ram_bytes()?,
-        num_disks: num_disks()?,
-        acpi: AcpiHashes { loader: [0; 48], rsdp: [0; 48], tables: [0; 48] }, // TODO
-    })
+    let attestation_type = detect()?;
+    let acpi = match attestation_type {
+        AttestationType::GcpTdx | AttestationType::SelfHostedTdx => {
+            Some(ccel::read_acpi_hashes().map_err(ProveError::Ccel)?)
+        }
+        _ => None,
+    };
+    Ok(PlatformMetadata { attestation_type, ram_bytes: ram_bytes()?, num_disks: num_disks()?, acpi })
 }
 
 /// Identify the host platform via `systemd-detect-virt`
