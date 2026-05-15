@@ -13,7 +13,14 @@ pub fn metadata() -> Result<PlatformMetadata, ProveError> {
         }
         _ => None,
     };
-    Ok(PlatformMetadata { attestation_type, ram_bytes: ram_bytes()?, num_disks: num_disks()?, acpi })
+    let extra_disks = match attestation_type {
+        AttestationType::GcpTdx => 2,
+        AttestationType::AzureTdx => 1,
+        _ => 0,
+    };
+    let num_disks = num_disks()? - extra_disks;
+    let ram_bytes = ram_bytes()?;
+    Ok(PlatformMetadata { attestation_type, ram_bytes, num_disks, acpi })
 }
 
 /// Identify the host platform from DMI/SMBIOS strings
@@ -49,7 +56,7 @@ fn ram_bytes() -> Result<u64, ProveError> {
         // Read the "raw" file which contains raw SMBIOS bytes
         let raw = std::fs::read(entry.path().join("raw"))?;
         let mb = match u16::from_le_bytes(raw[0x0C..0x0E].try_into().unwrap()) {
-            // Per SMBIOS spec, a value of 0x7FFF indicates that the size is >32GB
+            // SMBIOS spec says that 0x7FFF indicates value over 32GB
             // In this case, the actual size is in bytes 0x1C-0x1F
             0x7FFF => u32::from_le_bytes(raw[0x1C..0x20].try_into().unwrap()) as u64,
             // Otherwise, the value is the size in MiB
