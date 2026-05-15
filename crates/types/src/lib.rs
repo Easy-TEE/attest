@@ -8,11 +8,9 @@ use serde_with::base64::Base64;
 use serde_with::hex::Hex;
 use serde_with::serde_as;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AttestationType {
-    #[default]
-    None,
     GcpTdx,
     AzureTdx,
     SelfHostedTdx,
@@ -21,7 +19,6 @@ pub enum AttestationType {
 impl AttestationType {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::None => "none",
             Self::GcpTdx => "gcp-tdx",
             Self::AzureTdx => "azure-tdx",
             Self::SelfHostedTdx => "self-hosted-tdx",

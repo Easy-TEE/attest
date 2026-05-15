@@ -1,14 +1,12 @@
 //! Detect the current CVM platform and gather hardware metadata
 
-use std::process::Command;
-
 use types::{AttestationType, PlatformMetadata};
 
 use crate::{ProveError, ccel};
 
 /// Identify the host platform and read system specs
 pub fn metadata() -> Result<PlatformMetadata, ProveError> {
-    let attestation_type = detect()?;
+    let attestation_type = detect();
     let acpi = match attestation_type {
         AttestationType::GcpTdx | AttestationType::SelfHostedTdx => {
             Some(ccel::read_acpi_hashes().map_err(ProveError::Ccel)?)
@@ -18,17 +16,24 @@ pub fn metadata() -> Result<PlatformMetadata, ProveError> {
     Ok(PlatformMetadata { attestation_type, ram_bytes: ram_bytes()?, num_disks: num_disks()?, acpi })
 }
 
-/// Identify the host platform via `systemd-detect-virt`
-pub fn detect() -> Result<AttestationType, ProveError> {
-    let output = Command::new("systemd-detect-virt").output()?;
-    let virt = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(match virt.as_str() {
-        "google" => AttestationType::GcpTdx,
-        "microsoft" => AttestationType::AzureTdx,
-        "kvm" | "qemu" => AttestationType::SelfHostedTdx,
-        "none" => return Err(ProveError::NotInTee),
-        other => return Err(ProveError::UnknownPlatform(other.to_string())),
-    })
+/// Identify the host platform from DMI/SMBIOS strings
+pub fn detect() -> AttestationType {
+    const DMI_FIELDS: &[&str] =
+        &["product_name", "sys_vendor", "board_vendor", "bios_vendor", "product_version"];
+    for field in DMI_FIELDS {
+        let Some(s) = read_dmi(field) else { continue };
+        if s.starts_with("Google Compute Engine") {
+            return AttestationType::GcpTdx;
+        }
+        if s.starts_with("Hyper-V") {
+            return AttestationType::AzureTdx;
+        }
+    }
+    AttestationType::SelfHostedTdx
+}
+
+fn read_dmi(name: &str) -> Option<String> {
+    std::fs::read_to_string(format!("/sys/class/dmi/id/{name}")).ok().map(|s| s.trim().to_string())
 }
 
 fn ram_bytes() -> Result<u64, ProveError> {
