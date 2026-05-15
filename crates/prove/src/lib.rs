@@ -34,8 +34,6 @@ pub enum ProveError {
     DcapQuote(#[from] tdx_attest::TdxAttestError),
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Parsing /proc/meminfo")]
-    MemInfoParse,
     #[error("CCEL: {0:#}")]
     Ccel(anyhow::Error),
     #[cfg(feature = "azure")]

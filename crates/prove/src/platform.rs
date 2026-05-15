@@ -36,15 +36,28 @@ fn read_dmi(name: &str) -> Option<String> {
     std::fs::read_to_string(format!("/sys/class/dmi/id/{name}")).ok().map(|s| s.trim().to_string())
 }
 
+/// Read the total RAM size by parsing memory device entries in DMI/SMBIOS
 fn ram_bytes() -> Result<u64, ProveError> {
-    let meminfo = std::fs::read_to_string("/proc/meminfo")?;
-    let kb: u64 = meminfo
-        .lines()
-        .find_map(|line| line.strip_prefix("MemTotal:"))
-        .and_then(|rest| rest.trim().strip_suffix("kB"))
-        .and_then(|n| n.trim().parse().ok())
-        .ok_or(ProveError::MemInfoParse)?;
-    Ok(kb * 1024)
+    const MIB: u64 = 1024 * 1024;
+    let mut total = 0u64;
+    for entry in std::fs::read_dir("/sys/firmware/dmi/entries")? {
+        // Filter to only memory devices (type 17)
+        let entry = entry?;
+        if !entry.file_name().to_string_lossy().starts_with("17-") {
+            continue;
+        }
+        // Read the "raw" file which contains raw SMBIOS bytes
+        let raw = std::fs::read(entry.path().join("raw"))?;
+        let mb = match u16::from_le_bytes(raw[0x0C..0x0E].try_into().unwrap()) {
+            // Per SMBIOS spec, a value of 0x7FFF indicates that the size is >32GB
+            // In this case, the actual size is in bytes 0x1C-0x1F
+            0x7FFF => u32::from_le_bytes(raw[0x1C..0x20].try_into().unwrap()) as u64,
+            // Otherwise, the value is the size in MiB
+            s => s as u64,
+        };
+        total += mb * MIB;
+    }
+    Ok(total)
 }
 
 fn num_disks() -> Result<u32, ProveError> {
