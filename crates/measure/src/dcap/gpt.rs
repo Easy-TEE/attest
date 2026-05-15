@@ -15,12 +15,16 @@ const DISK_GUID: &str = "12345678-1234-5678-1234-567812345678";
 const ESP_PARTITION_GUID: &str = "87654321-4321-8765-4321-876543218765";
 const EFI_SYSTEM_PARTITION_GUID: &str = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
 
+/// FAT32 minimum size
+const MIN_VFAT_BYTES: u64 = 260 * MIB;
+
 /// Deterministic UEFI disk GUID hash for a UKI of `uki_size` bytes
 pub(super) fn disk_guid_hash(uki_size: u64) -> [u8; 48] {
-    // ESP size: SizeMaxBytes rounded up to 4096 by systemd-repart
-    let esp_bytes = (uki_size + 32 * MIB).div_ceil(4096) * 4096;
-    // Disk size: rounded up to 1 GiB
-    let disk_bytes = (esp_bytes + MIB).div_ceil(GIB) * GIB;
+    // ESP size is rounded up to multiple of 4096 by systemd-repart
+    let size_max = (uki_size + 32 * MIB).div_ceil(4096) * 4096;
+    let esp_bytes = size_max.max(MIN_VFAT_BYTES);
+    // Disk size rounded up to multiple of 1 GiB
+    let disk_bytes = (size_max + MIB).div_ceil(GIB) * GIB;
     let disk_size_sectors = disk_bytes / 512;
     let esp_ending_lba = ESP_STARTING_LBA + esp_bytes / 512 - 1;
 
