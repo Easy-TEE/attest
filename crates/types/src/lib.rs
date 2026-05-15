@@ -4,7 +4,9 @@ use std::fmt;
 
 use parity_scale_codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
+use serde_with::base64::Base64;
 use serde_with::hex::Hex;
+use serde_with::serde_as;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -69,8 +71,10 @@ pub struct PlatformMetadata {
 
 /// Output of `prove` function
 /// Raw quote bytes plus info needed to reconstruct registers
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub struct AttestationEvidence {
+    #[serde_as(as = "Base64")]
     pub quote: Vec<u8>,
     pub platform: PlatformMetadata,
 }
