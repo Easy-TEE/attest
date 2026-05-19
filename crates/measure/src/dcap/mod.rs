@@ -10,15 +10,60 @@ mod gpt;
 #[allow(dead_code)]
 mod tdvf;
 
+use anyhow::{Result, bail};
 use serde::Serialize;
 use sha2::{Digest, Sha384};
 pub use types::DcapImageHashes;
+use types::{AttestationType, PlatformMetadata};
 
 use super::{
     Measurement,
     event::Register,
     uki::{Uki, to_utf16le_null_terminated},
 };
+
+/// Expected DCAP TDX register values for a given image on a given
+/// platform. Registers the platform does not constrain (e.g. RTMR0 on
+/// self-hosted, where firmware reconstruction is not yet supported) are
+/// returned as `None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpectedDcapRegisters {
+    pub mrtd: Option<[u8; 48]>,
+    pub rtmr0: Option<[u8; 48]>,
+    pub rtmr1: [u8; 48],
+    pub rtmr2: [u8; 48],
+}
+
+/// Rebuild expected DCAP register values from per-image hashes plus live
+/// platform metadata (ACPI, RAM, disk count).
+pub fn expected_dcap_registers(
+    image: &DcapImageHashes,
+    platform: &PlatformMetadata,
+) -> Result<ExpectedDcapRegisters> {
+    match platform.attestation_type {
+        AttestationType::GcpTdx => {
+            let acpi = platform.acpi.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("GCP RTMR0 reconstruction requires ACPI hashes")
+            })?;
+            let rtmr0 =
+                gcp::build_rtmr0(platform.ram_bytes, gcp::KNOWN_CFV, acpi, platform.num_disks)?
+                    .value();
+            Ok(ExpectedDcapRegisters {
+                mrtd: Some(gcp::KNOWN_MRTD),
+                rtmr0: Some(rtmr0),
+                rtmr1: gcp::build_rtmr1(image).value(),
+                rtmr2: build_rtmr2(image).value(),
+            })
+        }
+        AttestationType::SelfHostedTdx => Ok(ExpectedDcapRegisters {
+            mrtd: None,
+            rtmr0: None,
+            rtmr1: self_hosted::build_rtmr1(image).value(),
+            rtmr2: build_rtmr2(image).value(),
+        }),
+        other => bail!("attestation type {other:?} is not a DCAP TDX platform"),
+    }
+}
 
 /// Image-dependent DCAP register values
 #[derive(Debug, Serialize)]

@@ -1,8 +1,10 @@
 //! Computes expected values from a CVM running the specified image
 
 pub mod azure;
+pub mod ccel;
 pub mod dcap;
 pub mod event;
+pub mod platform;
 pub mod uki;
 
 use serde::Serialize;

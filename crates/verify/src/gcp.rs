@@ -1,18 +1,10 @@
 //! GCP TDX expected register rebuild
 
-use hex_literal::hex;
+use measure::dcap::gcp::{KNOWN_CFV, KNOWN_MRTD};
 use pccs::Pccs;
 use types::{DcapImageHashes, PlatformMetadata};
 
 use crate::{VerifyError, dcap};
-
-// TODO: replace with verified GCE endorsement lookup
-const KNOWN_MRTD: [u8; 48] = hex!(
-    "feb7486608382c1ff0e15b4648ddc0acea6ca974eb53e3529f4c4bd5ffbaa20bf335cb75965cea65fe473aed9647c162"
-);
-const KNOWN_CFV: [u8; 48] = hex!(
-    "9cb6bf09aea7b4acb8549e328d0edd6f15defc0b00d744bb9fb5bab0962bc5c70f69d233e96dbc7c1105ba085781dc88"
-);
 
 pub fn verify_portable(
     image_hashes: &DcapImageHashes,

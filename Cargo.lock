@@ -212,6 +212,7 @@ dependencies = [
  "serde_with",
  "sha2",
  "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -240,6 +241,7 @@ name = "attest-prove"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "attest-measure",
  "attest-types",
  "az-tdx-vtpm",
  "base64 0.22.1",

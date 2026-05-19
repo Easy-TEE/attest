@@ -9,6 +9,7 @@ keywords = ["attestation", "CVM", "TDX"]
 
 [dependencies]
 types = { workspace = true }
+measure = { workspace = true }
 
 thiserror = "2"
 anyhow = "1"

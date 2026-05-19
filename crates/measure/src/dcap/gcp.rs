@@ -14,6 +14,15 @@ use crate::event::{
     SEPARATOR,
 };
 
+/// GCP TDX firmware constants. Today these are pinned values; replace with
+/// a verified GCE endorsement lookup when one is available.
+pub const KNOWN_MRTD: [u8; 48] = hex!(
+    "feb7486608382c1ff0e15b4648ddc0acea6ca974eb53e3529f4c4bd5ffbaa20bf335cb75965cea65fe473aed9647c162"
+);
+pub const KNOWN_CFV: [u8; 48] = hex!(
+    "9cb6bf09aea7b4acb8549e328d0edd6f15defc0b00d744bb9fb5bab0962bc5c70f69d233e96dbc7c1105ba085781dc88"
+);
+
 /// EFI Boot variable hashes
 pub const BOOT_0001_HASH: [u8; 48] = hex!(
     "A25333C7AEC2E0993034938C7F11893B3C2BCAF67E88C342A3D586F6F7FAE2C6A1247A9ED86988080A6D4BE497D4FBB6"

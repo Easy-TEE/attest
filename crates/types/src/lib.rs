@@ -109,7 +109,7 @@ pub struct DcapRegisters {
 }
 
 /// Contains only measurement values that depend on the image
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PortableMeasurements {
     pub azure: Option<AzureRegisters>,
     pub dcap: DcapImageHashes,

@@ -2,8 +2,8 @@
 
 #[cfg(feature = "azure")]
 pub mod azure;
-pub mod ccel;
-pub mod platform;
+
+pub use measure::{ccel, platform};
 
 use thiserror::Error;
 use types::{AttestationEvidence, AttestationType};
@@ -28,21 +28,13 @@ pub fn prove(input_data: [u8; 64]) -> Result<AttestationEvidence, ProveError> {
 
 #[derive(Error, Debug)]
 pub enum ProveError {
-    #[error("Not running in a TEE")]
-    NotInTee,
-    #[error("Unrecognized platform: {0}")]
-    UnknownPlatform(String),
+    #[error(transparent)]
+    Platform(#[from] platform::PlatformError),
     #[cfg(not(feature = "azure"))]
     #[error("Azure attestation requested but `azure` feature is not enabled")]
     AzureFeatureDisabled,
     #[error("DCAP quote: {0}")]
     DcapQuote(#[from] tdx_attest::TdxAttestError),
-    #[error("I/O: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Parsing /proc/meminfo")]
-    MemInfoParse,
-    #[error("CCEL: {0:#}")]
-    Ccel(anyhow::Error),
     #[cfg(feature = "azure")]
     #[error("Azure: {0}")]
     Azure(#[from] azure::AzureError),
