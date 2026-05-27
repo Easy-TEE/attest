@@ -21,17 +21,12 @@ pub fn prove(input_data: [u8; 64]) -> Result<AttestationEvidence, ProveError> {
             #[cfg(feature = "azure")]
             azure::create_quote(input_data)?
         }
-        AttestationType::None => unreachable!("platform::detect rejects bare metal"),
     };
     Ok(AttestationEvidence { quote, platform })
 }
 
 #[derive(Error, Debug)]
 pub enum ProveError {
-    #[error("Not running in a TEE")]
-    NotInTee,
-    #[error("Unrecognized platform: {0}")]
-    UnknownPlatform(String),
     #[cfg(not(feature = "azure"))]
     #[error("Azure attestation requested but `azure` feature is not enabled")]
     AzureFeatureDisabled,
@@ -39,8 +34,6 @@ pub enum ProveError {
     DcapQuote(#[from] tdx_attest::TdxAttestError),
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Parsing /proc/meminfo")]
-    MemInfoParse,
     #[error("CCEL: {0:#}")]
     Ccel(anyhow::Error),
     #[cfg(feature = "azure")]

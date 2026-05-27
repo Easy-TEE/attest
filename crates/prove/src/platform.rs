@@ -1,45 +1,70 @@
 //! Detect the current CVM platform and gather hardware metadata
 
-use std::process::Command;
-
 use types::{AttestationType, PlatformMetadata};
 
 use crate::{ProveError, ccel};
 
 /// Identify the host platform and read system specs
 pub fn metadata() -> Result<PlatformMetadata, ProveError> {
-    let attestation_type = detect()?;
+    let attestation_type = detect();
     let acpi = match attestation_type {
         AttestationType::GcpTdx | AttestationType::SelfHostedTdx => {
             Some(ccel::read_acpi_hashes().map_err(ProveError::Ccel)?)
         }
         _ => None,
     };
-    Ok(PlatformMetadata { attestation_type, ram_bytes: ram_bytes()?, num_disks: num_disks()?, acpi })
+    let extra_disks = match attestation_type {
+        AttestationType::GcpTdx => 2,
+        AttestationType::AzureTdx => 1,
+        _ => 0,
+    };
+    let num_disks = num_disks()? - extra_disks;
+    let ram_bytes = ram_bytes()?;
+    Ok(PlatformMetadata { attestation_type, ram_bytes, num_disks, acpi })
 }
 
-/// Identify the host platform via `systemd-detect-virt`
-pub fn detect() -> Result<AttestationType, ProveError> {
-    let output = Command::new("systemd-detect-virt").output()?;
-    let virt = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(match virt.as_str() {
-        "google" => AttestationType::GcpTdx,
-        "microsoft" => AttestationType::AzureTdx,
-        "kvm" | "qemu" => AttestationType::SelfHostedTdx,
-        "none" => return Err(ProveError::NotInTee),
-        other => return Err(ProveError::UnknownPlatform(other.to_string())),
-    })
+/// Identify the host platform from DMI/SMBIOS strings
+pub fn detect() -> AttestationType {
+    const DMI_FIELDS: &[&str] =
+        &["product_name", "sys_vendor", "board_vendor", "bios_vendor", "product_version"];
+    for field in DMI_FIELDS {
+        let Some(s) = read_dmi(field) else { continue };
+        if s.starts_with("Google Compute Engine") {
+            return AttestationType::GcpTdx;
+        }
+        if s.starts_with("Hyper-V") {
+            return AttestationType::AzureTdx;
+        }
+    }
+    AttestationType::SelfHostedTdx
 }
 
+fn read_dmi(name: &str) -> Option<String> {
+    std::fs::read_to_string(format!("/sys/class/dmi/id/{name}")).ok().map(|s| s.trim().to_string())
+}
+
+/// Read the total RAM size by parsing memory device entries in DMI/SMBIOS
 fn ram_bytes() -> Result<u64, ProveError> {
-    let meminfo = std::fs::read_to_string("/proc/meminfo")?;
-    let kb: u64 = meminfo
-        .lines()
-        .find_map(|line| line.strip_prefix("MemTotal:"))
-        .and_then(|rest| rest.trim().strip_suffix("kB"))
-        .and_then(|n| n.trim().parse().ok())
-        .ok_or(ProveError::MemInfoParse)?;
-    Ok(kb * 1024)
+    const MIB: u64 = 1024 * 1024;
+    let mut total = 0u64;
+    for entry in std::fs::read_dir("/sys/firmware/dmi/entries")? {
+        // Filter to only memory devices (type 17)
+        let entry = entry?;
+        if !entry.file_name().to_string_lossy().starts_with("17-") {
+            continue;
+        }
+        // Read the "raw" file which contains raw SMBIOS bytes
+        let raw = std::fs::read(entry.path().join("raw"))?;
+        let mb = match u16::from_le_bytes(raw[0x0C..0x0E].try_into().unwrap()) {
+            // SMBIOS spec says that 0x7FFF indicates value over 32GB
+            // In this case, the actual size is in bytes 0x1C-0x1F
+            0x7FFF => u32::from_le_bytes(raw[0x1C..0x20].try_into().unwrap()) as u64,
+            // Otherwise, the value is the size in MiB
+            s => s as u64,
+        };
+        total += mb * MIB;
+    }
+    Ok(total)
 }
 
 fn num_disks() -> Result<u32, ProveError> {

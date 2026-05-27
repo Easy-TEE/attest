@@ -34,12 +34,6 @@ pub(crate) enum Target {
     SelfHosted {
         /// Image file to measure
         uki: PathBuf,
-        /// Firmware file
-        #[arg(long)]
-        firmware: PathBuf,
-        /// RAM size (e.g. "2G" or "512M")
-        #[arg(long, default_value = "2G", value_parser = parse_ram)]
-        ram: u64,
         #[arg(long)]
         debug: bool,
     },
@@ -61,14 +55,9 @@ pub(crate) fn run(target: Target) -> Result<()> {
             let hashes = measure::dcap::measure(&load_uki(&uki)?);
             emit(measure::dcap::gcp::measure(&hashes), debug, MeasurementOutput::Dcap)?
         }
-        Target::SelfHosted { uki, firmware, ram, debug } => {
+        Target::SelfHosted { uki, debug } => {
             let hashes = measure::dcap::measure(&load_uki(&uki)?);
-            let fw = std::fs::read(&firmware)?;
-            emit(
-                measure::dcap::self_hosted::measure(&hashes, &fw, ram)?,
-                debug,
-                MeasurementOutput::Dcap,
-            )?
+            emit(measure::dcap::self_hosted::measure(&hashes), debug, MeasurementOutput::Dcap)?
         }
     };
     println!("{}", to_string_pretty(&out)?);
@@ -85,16 +74,4 @@ fn emit<M: Measurement>(
 
 fn load_uki(path: &Path) -> Result<Uki> {
     Uki::parse(&std::fs::read(path)?)
-}
-
-fn parse_ram(s: &str) -> Result<u64, String> {
-    let s = s.trim();
-    let (num, mult) = if let Some(n) = s.strip_suffix('G') {
-        (n, 1024 * 1024 * 1024)
-    } else if let Some(n) = s.strip_suffix('M') {
-        (n, 1024 * 1024)
-    } else {
-        (s, 1)
-    };
-    num.parse::<u64>().map(|n| n * mult).map_err(|e| format!("invalid RAM size '{s}': {e}"))
 }
