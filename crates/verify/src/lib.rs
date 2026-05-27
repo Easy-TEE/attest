@@ -4,6 +4,7 @@
 pub mod azure;
 pub mod dcap;
 pub mod gcp;
+pub mod self_hosted;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -19,10 +20,11 @@ pub fn verify(
     expected: &MeasurementOutput,
     evidence: &AttestationEvidence,
     pccs: &Pccs,
+    firmware: Option<&[u8]>,
     debug: bool,
 ) -> Result<[u8; 64], VerifyError> {
     let time = SystemTime::now().duration_since(UNIX_EPOCH).expect("time before epoch").as_secs();
-    verify_at(expected, evidence, pccs, time, debug)
+    verify_at(expected, evidence, pccs, firmware, time, debug)
 }
 
 /// Same as [`verify`] but takes an explicit time argument
@@ -31,6 +33,7 @@ pub fn verify_at(
     expected: &MeasurementOutput,
     evidence: &AttestationEvidence,
     pccs: &Pccs,
+    firmware: Option<&[u8]>,
     time: u64,
     debug: bool,
 ) -> Result<[u8; 64], VerifyError> {
@@ -38,8 +41,17 @@ pub fn verify_at(
         (MeasurementOutput::Portable(p), AttestationType::GcpTdx) => {
             gcp::verify_portable(&p.dcap, &evidence.platform, &evidence.quote, pccs, time, debug)
         }
-        (MeasurementOutput::Portable(_), AttestationType::SelfHostedTdx) => {
-            Err(VerifyError::SelfHostedRebuildNotImplemented)
+        (MeasurementOutput::Portable(p), AttestationType::SelfHostedTdx) => {
+            let firmware = firmware.ok_or(VerifyError::MissingFirmware)?;
+            self_hosted::verify_portable(
+                &p.dcap,
+                &evidence.platform,
+                firmware,
+                &evidence.quote,
+                pccs,
+                time,
+                debug,
+            )
         }
         #[cfg(feature = "azure")]
         (MeasurementOutput::Portable(p), AttestationType::AzureTdx) => {
@@ -159,8 +171,8 @@ pub enum VerifyError {
     RegisterMismatch(Vec<&'static str>),
     #[error("Platform metadata is missing ACPI hashes")]
     MissingAcpi,
-    #[error("Self-hosted register reconstruction is not yet implemented")]
-    SelfHostedRebuildNotImplemented,
+    #[error("Firmware blob required for self-hosted register verification")]
+    MissingFirmware,
     #[cfg(not(feature = "azure"))]
     #[error("Azure verification requested but `azure` feature is not enabled")]
     AzureFeatureDisabled,

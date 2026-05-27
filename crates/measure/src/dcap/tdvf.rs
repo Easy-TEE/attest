@@ -16,6 +16,49 @@ const FW_GUID_ENTRY_SIZE: usize = 18; // u16 size + 16-byte GUID
 const TDX_METADATA_OFFSET_GUID: &str = "e47a6535-984a-4798-865e-4685a7bf8ec2";
 
 const SECTION_TYPE_CFV: u32 = 1;
+pub(super) const SECTION_TYPE_TD_HOB: u32 = 2;
+pub(super) const SECTION_TYPE_TEMP_MEM: u32 = 3;
+
+const PAGE_SIZE: u64 = 0x1000;
+const MR_EXTEND_GRANULARITY: usize = 0x100;
+const ATTRIBUTE_MR_EXTEND: u32 = 0x01;
+const ATTRIBUTE_PAGE_AUG: u32 = 0x02;
+
+/// MRTD value for a TD built from this firmware (single-pass page ordering, QEMU >= 9.0)
+pub fn mrtd_sha384(fw: &[u8]) -> Result<[u8; 48]> {
+    let mut h = Sha384::new();
+    for s in tdx_metadata_sections(fw)? {
+        let num_pages = s.memory_data_size / PAGE_SIZE;
+        for page in 0..num_pages {
+            let page_gpa = s.memory_address + page * PAGE_SIZE;
+            if s.attributes & ATTRIBUTE_PAGE_AUG == 0 {
+                extend_tdx_op(&mut h, b"MEM.PAGE.ADD", page_gpa);
+            }
+            if s.attributes & ATTRIBUTE_MR_EXTEND != 0 {
+                for chunk in 0..(PAGE_SIZE as usize / MR_EXTEND_GRANULARITY) {
+                    let gpa = page_gpa + (chunk * MR_EXTEND_GRANULARITY) as u64;
+                    extend_tdx_op(&mut h, b"MR.EXTEND", gpa);
+                    let start = s.image_offset as usize
+                        + (page * PAGE_SIZE) as usize
+                        + chunk * MR_EXTEND_GRANULARITY;
+                    let end = start + MR_EXTEND_GRANULARITY;
+                    if end > fw.len() {
+                        bail!("section data out of bounds: {start}..{end} of {}", fw.len());
+                    }
+                    h.update(&fw[start..end]);
+                }
+            }
+        }
+    }
+    Ok(h.finalize().into())
+}
+
+fn extend_tdx_op(h: &mut Sha384, op: &[u8], gpa: u64) {
+    let mut buf = [0u8; 128];
+    buf[..op.len()].copy_from_slice(op);
+    buf[16..24].copy_from_slice(&gpa.to_le_bytes());
+    h.update(buf);
+}
 
 /// SHA-384 of the Configuration Firmware Volume section of an OVMF blob
 /// This is the value measured into RTMR0 as EV_EFI_PLATFORM_FIRMWARE_BLOB2
@@ -39,13 +82,16 @@ fn configuration_firmware_volume(fw: &[u8]) -> Result<&[u8]> {
 }
 
 #[derive(Debug)]
-struct Section {
-    image_offset: u32,
-    raw_data_size: u32,
-    kind: u32,
+pub(super) struct Section {
+    pub(super) image_offset: u32,
+    pub(super) raw_data_size: u32,
+    pub(super) memory_address: u64,
+    pub(super) memory_data_size: u64,
+    pub(super) kind: u32,
+    pub(super) attributes: u32,
 }
 
-fn tdx_metadata_sections(fw: &[u8]) -> Result<Vec<Section>> {
+pub(super) fn tdx_metadata_sections(fw: &[u8]) -> Result<Vec<Section>> {
     let offset = tdx_metadata_offset(fw)?;
     if offset > fw.len() {
         bail!("TDX metadata offset {} > firmware size {}", offset, fw.len());
@@ -70,7 +116,10 @@ fn tdx_metadata_sections(fw: &[u8]) -> Result<Vec<Section>> {
         sections.push(Section {
             image_offset: u32::from_le_bytes(cursor[0..4].try_into().unwrap()),
             raw_data_size: u32::from_le_bytes(cursor[4..8].try_into().unwrap()),
+            memory_address: u64::from_le_bytes(cursor[8..16].try_into().unwrap()),
+            memory_data_size: u64::from_le_bytes(cursor[16..24].try_into().unwrap()),
             kind: u32::from_le_bytes(cursor[24..28].try_into().unwrap()),
+            attributes: u32::from_le_bytes(cursor[28..32].try_into().unwrap()),
         });
         cursor = &cursor[32..];
     }

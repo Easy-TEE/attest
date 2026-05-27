@@ -22,6 +22,10 @@ pub(crate) struct Args {
     #[arg(long)]
     pccs_url: Option<String>,
 
+    /// Firmware blob (required for self-hosted Portable measurements)
+    #[arg(long)]
+    firmware: Option<PathBuf>,
+
     /// Print actual/expected register values on mismatch
     #[arg(short, long)]
     debug: bool,
@@ -30,6 +34,7 @@ pub(crate) struct Args {
 pub(crate) fn run(args: Args) -> Result<()> {
     let expected: MeasurementOutput = serde_json::from_slice(&std::fs::read(&args.measurement)?)?;
     let evidence: AttestationEvidence = serde_json::from_slice(&read_evidence(args.evidence)?)?;
+    let firmware = args.firmware.map(std::fs::read).transpose()?;
 
     let runtime = tokio::runtime::Runtime::new()?;
     let pccs = runtime.block_on(async {
@@ -38,7 +43,8 @@ pub(crate) fn run(args: Args) -> Result<()> {
         anyhow::Ok(pccs)
     })?;
 
-    let report_data = verify::verify(&expected, &evidence, &pccs, args.debug)?;
+    let report_data =
+        verify::verify(&expected, &evidence, &pccs, firmware.as_deref(), args.debug)?;
     println!("{}", hex::encode(report_data));
     Ok(())
 }

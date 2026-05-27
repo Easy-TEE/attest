@@ -7,8 +7,8 @@ pub mod self_hosted;
 pub mod td_hob;
 
 mod gpt;
-#[allow(dead_code)]
 mod tdvf;
+pub use tdvf::mrtd_sha384;
 
 use serde::Serialize;
 use sha2::{Digest, Sha384};
