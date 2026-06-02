@@ -5,7 +5,7 @@ use hex_literal::hex;
 use sha2::Sha384;
 use types::AcpiHashes;
 
-use super::{DcapImageHashes, DcapRegisters, build_rtmr2, secure_boot, td_hob};
+use super::{DcapFirmware, DcapImageHashes, DcapRegisters, build_rtmr2, secure_boot};
 use crate::event::{
     CALLING_EFI_APP,
     EXIT_BOOT_SERVICES,
@@ -40,15 +40,15 @@ pub fn measure(hashes: &DcapImageHashes) -> DcapRegisters {
 
 /// RTMR0: GCP-specific platform measurements (independent of image)
 pub fn build_rtmr0(
+    firmware: &DcapFirmware,
     ram_bytes: u64,
-    cfv: [u8; 48],
     acpi: &AcpiHashes,
     num_disks: u32,
 ) -> Result<Register<Sha384>> {
     ensure!(num_disks <= 1, "num_disks > 1 not yet supported"); // TODO
     let mut mr = Register::new();
-    mr.extend_raw(td_hob::digest(ram_bytes)?, "TD HOB");
-    mr.extend_raw(cfv, "CFV image");
+    mr.extend_raw(firmware.hob.digest(ram_bytes)?, "TD HOB");
+    mr.extend_raw(firmware.cfv, "CFV image");
     mr.extend_raw(secure_boot::secureboot_off(), "secure boot");
     mr.extend_raw(secure_boot::pk(), "PK");
     mr.extend_raw(secure_boot::kek(), "KEK");

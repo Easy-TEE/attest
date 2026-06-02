@@ -3,16 +3,22 @@
 #[cfg(feature = "azure")]
 pub mod azure;
 pub mod dcap;
-pub mod gcp;
-pub mod self_hosted;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use measure::dcap::{DcapFirmware, ReconstructError, expected_dcap_registers};
 use pccs::Pccs;
 use thiserror::Error;
 #[cfg(feature = "azure")]
 use types::AzureRegisters;
-use types::{AttestationEvidence, AttestationType, DcapRegisters, MeasurementOutput};
+use types::{
+    AttestationEvidence,
+    AttestationType,
+    DcapImageHashes,
+    DcapRegisters,
+    MeasurementOutput,
+    PlatformMetadata,
+};
 
 /// Verify an attestation against an expected measurement set, returning
 /// the report data on success
@@ -38,26 +44,24 @@ pub fn verify_at(
     debug: bool,
 ) -> Result<[u8; 64], VerifyError> {
     match (expected, evidence.platform.attestation_type) {
-        (MeasurementOutput::Portable(p), AttestationType::GcpTdx) => {
-            gcp::verify_portable(&p.dcap, &evidence.platform, &evidence.quote, pccs, time, debug)
-        }
-        (MeasurementOutput::Portable(p), AttestationType::SelfHostedTdx) => {
-            let firmware = firmware.ok_or(VerifyError::MissingFirmware)?;
-            self_hosted::verify_portable(
-                &p.dcap,
-                &evidence.platform,
-                firmware,
-                &evidence.quote,
-                pccs,
-                time,
-                debug,
-            )
-        }
         #[cfg(feature = "azure")]
         (MeasurementOutput::Portable(p), AttestationType::AzureTdx) => {
             let azure = p.azure.as_ref().ok_or(VerifyError::PlatformMismatch)?;
             verify_azure_at(azure, &evidence.quote, pccs, time, debug)
         }
+        #[cfg(not(feature = "azure"))]
+        (MeasurementOutput::Azure(_), _) | (_, AttestationType::AzureTdx) => {
+            Err(VerifyError::AzureFeatureDisabled)
+        }
+        (MeasurementOutput::Portable(p), _) => verify_portable_dcap_at(
+            &p.dcap,
+            &evidence.platform,
+            firmware,
+            &evidence.quote,
+            pccs,
+            time,
+            debug,
+        ),
         (MeasurementOutput::Dcap(d), AttestationType::GcpTdx | AttestationType::SelfHostedTdx) => {
             verify_dcap_at(d, &evidence.quote, pccs, time, debug)
         }
@@ -65,12 +69,54 @@ pub fn verify_at(
         (MeasurementOutput::Azure(a), AttestationType::AzureTdx) => {
             verify_azure_at(a, &evidence.quote, pccs, time, debug)
         }
-        #[cfg(not(feature = "azure"))]
-        (MeasurementOutput::Azure(_), _) | (_, AttestationType::AzureTdx) => {
-            Err(VerifyError::AzureFeatureDisabled)
-        }
         _ => Err(VerifyError::PlatformMismatch),
     }
+}
+
+fn verify_portable_dcap_at(
+    image: &DcapImageHashes,
+    platform: &PlatformMetadata,
+    firmware_blob: Option<&[u8]>,
+    quote: &[u8],
+    pccs: &Pccs,
+    time: u64,
+    debug: bool,
+) -> Result<[u8; 64], VerifyError> {
+    let firmware = match platform.attestation_type {
+        AttestationType::GcpTdx => DcapFirmware::gcp_hardcoded(),
+        AttestationType::SelfHostedTdx => {
+            let blob = firmware_blob.ok_or(VerifyError::MissingFirmware)?;
+            DcapFirmware::from_blob(blob).map_err(ReconstructError::Firmware)?
+        }
+        _ => return Err(VerifyError::PlatformMismatch),
+    };
+    let raw = dcap::validate_quote_at(quote, pccs, time)?;
+    let expected = expected_dcap_registers(image, platform, Some(&firmware))?;
+
+    let expected_mrtd = expected.mrtd.ok_or(VerifyError::IncompleteReconstruction("MRTD"))?;
+    let expected_rtmr0 = expected.rtmr0.ok_or(VerifyError::IncompleteReconstruction("RTMR0"))?;
+
+    let mut mismatches = Vec::new();
+    if raw.mrtd != expected_mrtd {
+        report_mismatch(debug, "MRTD", &raw.mrtd, &expected_mrtd);
+        mismatches.push("MRTD");
+    }
+    if raw.rtmr0 != expected_rtmr0 {
+        report_mismatch(debug, "RTMR0", &raw.rtmr0, &expected_rtmr0);
+        mismatches.push("RTMR0");
+    }
+    if raw.rtmr1 != expected.rtmr1 {
+        report_mismatch(debug, "RTMR1", &raw.rtmr1, &expected.rtmr1);
+        mismatches.push("RTMR1");
+    }
+    if raw.rtmr2 != expected.rtmr2 {
+        report_mismatch(debug, "RTMR2", &raw.rtmr2, &expected.rtmr2);
+        mismatches.push("RTMR2");
+    }
+    if !mismatches.is_empty() {
+        return Err(VerifyError::RegisterMismatch(mismatches));
+    }
+    Ok(raw.report_data)
 }
 
 /// Verify DCAP quote and check registers against an expected set of
@@ -169,15 +215,15 @@ pub enum VerifyError {
     PlatformMismatch,
     #[error("Register mismatch: {}", .0.join(", "))]
     RegisterMismatch(Vec<&'static str>),
-    #[error("Platform metadata is missing ACPI hashes")]
-    MissingAcpi,
     #[error("Firmware blob required for self-hosted register verification")]
     MissingFirmware,
+    #[error("Expected {0} could not be reconstructed")]
+    IncompleteReconstruction(&'static str),
     #[cfg(not(feature = "azure"))]
     #[error("Azure verification requested but `azure` feature is not enabled")]
     AzureFeatureDisabled,
-    #[error("Rebuilding expected registers: {0}")]
-    Rebuild(#[from] anyhow::Error),
+    #[error("Reconstructing expected registers: {0}")]
+    Reconstruct(#[from] ReconstructError),
     #[error("DCAP: {0}")]
     Dcap(#[from] dcap::DcapError),
     #[cfg(feature = "azure")]

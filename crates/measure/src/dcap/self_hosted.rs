@@ -5,13 +5,12 @@ use sha2::Sha384;
 use types::AcpiHashes;
 
 use super::{
+    DcapFirmware,
     DcapImageHashes,
     DcapRegisters,
     build_rtmr2,
     gcp::BOOT_0000_HASH,
     secure_boot::{EFI_GLOBAL_VARIABLE_GUID, EFI_IMAGE_SECURITY_DATABASE_GUID, secure_boot_hash},
-    td_hob,
-    tdvf::cfv_sha384,
 };
 use crate::event::{
     CALLING_EFI_APP,
@@ -27,12 +26,16 @@ pub fn measure(hashes: &DcapImageHashes) -> DcapRegisters {
 }
 
 /// RTMR0 rebuilt from firmware blob + platform metadata
-pub fn build_rtmr0(fw: &[u8], ram_bytes: u64, acpi: &AcpiHashes) -> Result<Register<Sha384>> {
+pub fn build_rtmr0(
+    firmware: &DcapFirmware,
+    ram_bytes: u64,
+    acpi: &AcpiHashes,
+) -> Result<Register<Sha384>> {
     let global = &EFI_GLOBAL_VARIABLE_GUID;
     let db = &EFI_IMAGE_SECURITY_DATABASE_GUID;
     let mut mr = Register::new();
-    mr.extend_raw(td_hob::digest_from_firmware(fw, ram_bytes)?, "TD HOB");
-    mr.extend_raw(cfv_sha384(fw)?, "CFV image");
+    mr.extend_raw(firmware.hob.digest(ram_bytes)?, "TD HOB");
+    mr.extend_raw(firmware.cfv, "CFV image");
     mr.extend_raw(secure_boot_hash(global, "SecureBoot", &[]), "SecureBoot");
     mr.extend_raw(secure_boot_hash(global, "PK", &[]), "PK");
     mr.extend_raw(secure_boot_hash(global, "KEK", &[]), "KEK");
