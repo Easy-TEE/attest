@@ -86,7 +86,7 @@ fn verify_portable_dcap_at(
         AttestationType::GcpTdx => DcapFirmware::gcp_hardcoded(),
         AttestationType::SelfHostedTdx => {
             let blob = firmware_blob.ok_or(VerifyError::MissingFirmware)?;
-            DcapFirmware::from_blob(blob).map_err(ReconstructError::Firmware)?
+            DcapFirmware::from_blob(blob, false).map_err(ReconstructError::Firmware)?
         }
         _ => return Err(VerifyError::PlatformMismatch),
     };
