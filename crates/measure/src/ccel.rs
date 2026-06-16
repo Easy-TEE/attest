@@ -1,4 +1,4 @@
-//! CCEL parser — extracts ACPI hashes from RTMR0 events
+//! CCEL parser: extracts ACPI hashes from RTMR0 events
 
 use anyhow::{Context, Result, bail, ensure};
 use types::AcpiHashes;
@@ -103,4 +103,3 @@ impl<'a> Cursor<'a> {
         Ok(u32::from_le_bytes(self.read_bytes(4)?.try_into().unwrap()))
     }
 }
-

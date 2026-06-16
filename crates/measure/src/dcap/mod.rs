@@ -1,18 +1,20 @@
 //! Shared types and helpers for DCAP-based platforms (GCP, self-hosted,
 //! etc)
 
+pub mod firmware;
 pub mod gcp;
 pub mod secure_boot;
 pub mod self_hosted;
-pub mod td_hob;
 
 mod gpt;
 mod tdvf;
-pub use tdvf::mrtd_sha384;
-
+pub use firmware::{DcapFirmware, FirmwareError, HobTemplate};
 use serde::Serialize;
 use sha2::{Digest, Sha384};
+pub use tdvf::mrtd_sha384;
+use thiserror::Error;
 pub use types::DcapImageHashes;
+use types::{AttestationType, PlatformMetadata};
 
 use super::{
     Measurement,
@@ -63,4 +65,66 @@ pub fn build_rtmr2(hashes: &DcapImageHashes) -> Register<Sha384> {
 
 pub(crate) fn sha384(data: &[u8]) -> [u8; 48] {
     Sha384::digest(data).into()
+}
+
+/// Reconstructed DCAP register values
+/// Some fields will be None if reconstruction is incomplete due to missing
+/// firmware or platform metadata
+#[derive(Debug, Clone, Copy)]
+pub struct ExpectedDcapRegisters {
+    pub mrtd: Option<[u8; 48]>,
+    pub rtmr0: Option<[u8; 48]>,
+    pub rtmr1: [u8; 48],
+    pub rtmr2: [u8; 48],
+}
+
+#[derive(Error, Debug)]
+pub enum ReconstructError {
+    #[error("Azure attestations have no DCAP registers")]
+    NotDcap,
+    #[error("platform metadata missing ACPI hashes")]
+    MissingAcpi,
+    #[error("GCP reconstruction requires firmware")]
+    MissingFirmware,
+    #[error("firmware: {0}")]
+    Firmware(#[from] FirmwareError),
+    #[error("register rebuild: {0:#}")]
+    Rebuild(#[from] anyhow::Error),
+}
+
+/// Reconstruct expected DCAP registers from image hashes/platform metadata
+pub fn expected_dcap_registers(
+    image: &DcapImageHashes,
+    platform: &PlatformMetadata,
+    firmware: Option<&DcapFirmware>,
+) -> Result<ExpectedDcapRegisters, ReconstructError> {
+    let rtmr2 = build_rtmr2(image).value();
+    match platform.attestation_type {
+        AttestationType::GcpTdx => {
+            let acpi = platform.acpi.as_ref().ok_or(ReconstructError::MissingAcpi)?;
+            let firmware = firmware.ok_or(ReconstructError::MissingFirmware)?;
+            let rtmr0 =
+                gcp::build_rtmr0(firmware, platform.ram_bytes, acpi, platform.num_disks)?.value();
+            let rtmr1 = gcp::build_rtmr1(image).value();
+            Ok(ExpectedDcapRegisters {
+                mrtd: Some(firmware.mrtd),
+                rtmr0: Some(rtmr0),
+                rtmr1,
+                rtmr2,
+            })
+        }
+        AttestationType::SelfHostedTdx => {
+            let rtmr1 = self_hosted::build_rtmr1(image).value();
+            let (mrtd, rtmr0) = match firmware {
+                Some(fw) => {
+                    let acpi = platform.acpi.as_ref().ok_or(ReconstructError::MissingAcpi)?;
+                    let rtmr0 = self_hosted::build_rtmr0(fw, platform.ram_bytes, acpi)?.value();
+                    (Some(fw.mrtd), Some(rtmr0))
+                }
+                None => (None, None),
+            };
+            Ok(ExpectedDcapRegisters { mrtd, rtmr0, rtmr1, rtmr2 })
+        }
+        AttestationType::AzureTdx => Err(ReconstructError::NotDcap),
+    }
 }

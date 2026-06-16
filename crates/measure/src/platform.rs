@@ -1,15 +1,28 @@
 //! Detect the current CVM platform and gather hardware metadata
 
+use thiserror::Error;
 use types::{AttestationType, PlatformMetadata};
 
-use crate::{ProveError, ccel};
+use crate::ccel;
+
+#[derive(Error, Debug)]
+pub enum PlatformError {
+    #[error("I/O: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("CCEL: {0:#}")]
+    Ccel(anyhow::Error),
+}
 
 /// Identify the host platform and read system specs
-pub fn metadata() -> Result<PlatformMetadata, ProveError> {
-    let attestation_type = detect();
+pub fn metadata() -> Result<PlatformMetadata, PlatformError> {
+    metadata_for(detect())
+}
+
+/// Read system specs for a given platform, skipping DMI-based detection
+pub fn metadata_for(attestation_type: AttestationType) -> Result<PlatformMetadata, PlatformError> {
     let acpi = match attestation_type {
         AttestationType::GcpTdx | AttestationType::SelfHostedTdx => {
-            Some(ccel::read_acpi_hashes().map_err(ProveError::Ccel)?)
+            Some(ccel::read_acpi_hashes().map_err(PlatformError::Ccel)?)
         }
         _ => None,
     };
@@ -44,7 +57,7 @@ fn read_dmi(name: &str) -> Option<String> {
 }
 
 /// Read the total RAM size by parsing memory device entries in DMI/SMBIOS
-fn ram_bytes() -> Result<u64, ProveError> {
+fn ram_bytes() -> Result<u64, PlatformError> {
     const MIB: u64 = 1024 * 1024;
     let mut total = 0u64;
     for entry in std::fs::read_dir("/sys/firmware/dmi/entries")? {
@@ -67,7 +80,7 @@ fn ram_bytes() -> Result<u64, ProveError> {
     Ok(total)
 }
 
-fn num_disks() -> Result<u32, ProveError> {
+fn num_disks() -> Result<u32, PlatformError> {
     let mut n: u32 = 0;
     for entry in std::fs::read_dir("/sys/block")? {
         let name = entry?.file_name();

@@ -2,9 +2,8 @@
 
 #[cfg(feature = "azure")]
 pub mod azure;
-pub mod ccel;
-pub mod platform;
 
+use measure::platform;
 use thiserror::Error;
 use types::{AttestationEvidence, AttestationType};
 
@@ -32,10 +31,8 @@ pub enum ProveError {
     AzureFeatureDisabled,
     #[error("DCAP quote: {0}")]
     DcapQuote(#[from] tdx_attest::TdxAttestError),
-    #[error("I/O: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("CCEL: {0:#}")]
-    Ccel(anyhow::Error),
+    #[error("Platform: {0}")]
+    Platform(#[from] platform::PlatformError),
     #[cfg(feature = "azure")]
     #[error("Azure: {0}")]
     Azure(#[from] azure::AzureError),
