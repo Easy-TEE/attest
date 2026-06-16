@@ -7,6 +7,8 @@ use rsa::{
     pss::{Signature, VerifyingKey},
     signature::Verifier,
 };
+use serde::{Deserialize, Serialize};
+use serde_with::hex::Hex;
 use sha2::{Digest, Sha256, Sha384};
 use thiserror::Error;
 use x509_parser::prelude::*;
@@ -24,7 +26,9 @@ const ENDORSEMENT_BUCKET: &str = "https://storage.googleapis.com/gce_tcb_integri
 const ROOT_CERT_URL: &str = "https://pki.goog/cloud_integrity/GCE-cc-tcb-root_1.crt";
 
 /// Firmware-based inputs needed to rebuild MRTD and RTMR0
-#[derive(Debug, Clone)]
+#[serde_with::apply([u8; 48] => #[serde_as(as = "Hex")])]
+#[serde_with::serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DcapFirmware {
     pub mrtd: [u8; 48],
     pub cfv: [u8; 48],
@@ -32,8 +36,10 @@ pub struct DcapFirmware {
 }
 
 /// Contains HOB bytes with a placeholder for RAM amount
-#[derive(Debug, Clone)]
+#[serde_with::serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HobTemplate {
+    #[serde_as(as = "Hex")]
     pub bytes: Vec<u8>,
     pub length_offset: usize,
     pub ram_threshold: u64,
