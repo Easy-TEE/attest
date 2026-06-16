@@ -9,10 +9,9 @@ pub mod self_hosted;
 mod gpt;
 mod tdvf;
 pub use firmware::{DcapFirmware, FirmwareError, HobTemplate};
-pub use tdvf::mrtd_sha384;
-
 use serde::Serialize;
 use sha2::{Digest, Sha384};
+pub use tdvf::mrtd_sha384;
 use thiserror::Error;
 pub use types::DcapImageHashes;
 use types::{AttestationType, PlatformMetadata};
@@ -69,6 +68,8 @@ pub(crate) fn sha384(data: &[u8]) -> [u8; 48] {
 }
 
 /// Reconstructed DCAP register values
+/// Some fields will be None if reconstruction is incomplete due to missing
+/// firmware or platform metadata
 #[derive(Debug, Clone, Copy)]
 pub struct ExpectedDcapRegisters {
     pub mrtd: Option<[u8; 48]>,
@@ -91,7 +92,7 @@ pub enum ReconstructError {
     Rebuild(#[from] anyhow::Error),
 }
 
-/// Reconstruct expected DCAP registers from image hashes and platform metadata
+/// Reconstruct expected DCAP registers from image hashes/platform metadata
 pub fn expected_dcap_registers(
     image: &DcapImageHashes,
     platform: &PlatformMetadata,
