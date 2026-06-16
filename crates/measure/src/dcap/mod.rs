@@ -8,7 +8,7 @@ pub mod self_hosted;
 
 mod gpt;
 mod tdvf;
-pub use firmware::{DcapFirmware, FirmwareError, HobTemplate};
+pub use firmware::{DcapFirmware, FirmwareError, GoogleError, HobTemplate};
 use serde::Serialize;
 use sha2::{Digest, Sha384};
 pub use tdvf::mrtd_sha384;

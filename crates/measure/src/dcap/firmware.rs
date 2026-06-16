@@ -1,8 +1,15 @@
 //! Firmware-based DCAP register reconstruction inputs
 
-use hex_literal::hex;
-use sha2::{Digest, Sha384};
+use prost::Message;
+use rsa::{
+    RsaPublicKey,
+    pkcs8::DecodePublicKey,
+    pss::{Signature, VerifyingKey},
+    signature::Verifier,
+};
+use sha2::{Digest, Sha256, Sha384};
 use thiserror::Error;
+use x509_parser::prelude::*;
 
 use super::tdvf::{self, SECTION_TYPE_TD_HOB, SECTION_TYPE_TEMP_MEM};
 
@@ -11,8 +18,10 @@ const LOW_MEM_TOP_GCP: u64 = 0xC000_0000;
 const HIGH_MEM_START: u64 = 0x1_0000_0000;
 const DEFAULT_TD_HOB_BASE: u64 = 0x80_9000;
 
-const GCP_HOB_TEMPLATE: &[u8] = include_bytes!("../../assets/td_hob_template.bin");
-const GCP_HOB_LENGTH_OFFSET: usize = 0x240;
+/// Bucket containing Google's signed endorsements and firmware blobs
+const ENDORSEMENT_BUCKET: &str = "https://storage.googleapis.com/gce_tcb_integrity/ovmf_x64_csm";
+/// Google root certificate for verifying endorsements
+const ROOT_CERT_URL: &str = "https://pki.goog/cloud_integrity/GCE-cc-tcb-root_1.crt";
 
 /// Firmware-based inputs needed to rebuild MRTD and RTMR0
 #[derive(Debug, Clone)]
@@ -53,27 +62,25 @@ impl HobTemplate {
 }
 
 impl DcapFirmware {
-    /// Pinned snapshot of the current Google Cloud TDX firmware
-    // TODO: replace with verified Google Cloud endorsement lookup
-    pub fn gcp_hardcoded() -> Self {
-        Self {
-            mrtd: hex!("feb7486608382c1ff0e15b4648ddc0acea6ca974eb53e3529f4c4bd5ffbaa20bf335cb75965cea65fe473aed9647c162"),
-            // TODO: derive these from the firmware blob
-            cfv: hex!("9cb6bf09aea7b4acb8549e328d0edd6f15defc0b00d744bb9fb5bab0962bc5c70f69d233e96dbc7c1105ba085781dc88"),
-            hob: HobTemplate {
-                bytes: GCP_HOB_TEMPLATE.to_vec(),
-                length_offset: GCP_HOB_LENGTH_OFFSET,
-                ram_threshold: LOW_MEM_TOP_GCP,
-            },
-        }
-    }
+    /// Download and verify firmware for a GCP MRTD, then derive events
+    pub fn from_google(mrtd: [u8; 48]) -> Result<Self, GoogleError> {
+        let bytes = http_get(&format!("{ENDORSEMENT_BUCKET}/tdx/{}.binarypb", hex::encode(mrtd)))?;
+        let endorsement = Endorsement::decode(&*bytes).map_err(|_| GoogleError::Endorsement)?;
+        let golden = GoldenMeasurement::decode(&*endorsement.serialized_uefi_golden)
+            .map_err(|_| GoogleError::Endorsement)?;
+        verify_endorsement(&endorsement, &golden)?;
 
-    // TODO: pub fn from_google(mrtd: [u8; 48]) -> Self
-    // 1. get endorsement from public bucket
-    // 2. verify endorsement signature
-    // 3. get firmware file path from endorsement
-    // 4. download firmware file
-    // 5. parse firmware file to get HOB template and CFV
+        let fw_raw = http_get(&format!("{ENDORSEMENT_BUCKET}/{}.fd", hex::encode(&golden.digest)))?;
+        if Sha384::digest(&fw_raw)[..] != golden.digest[..] {
+            return Err(GoogleError::Mismatch("firmware digest"));
+        }
+
+        let firmware = Self::from_blob(&fw_raw, true)?;
+        if firmware.mrtd != mrtd {
+            return Err(GoogleError::Mismatch("MRTD"));
+        }
+        Ok(firmware)
+    }
 
     /// Derive firmware events by parsing firmware blob
     pub fn from_blob(fw: &[u8], gcp: bool) -> Result<Self, FirmwareError> {
@@ -167,24 +174,109 @@ fn push_memory_range(hob: &mut Vec<u8>, accepted: bool, gcp: bool, start: u64, l
     hob.extend_from_slice(&length.to_le_bytes());
 }
 
+#[derive(Message)]
+struct Endorsement {
+    // Raw bytes are needed verify signature
+    #[prost(bytes = "vec", tag = "1")]
+    serialized_uefi_golden: Vec<u8>,
+    #[prost(bytes = "vec", tag = "2")]
+    signature: Vec<u8>,
+}
+
+#[derive(Message)]
+struct GoldenMeasurement {
+    #[prost(bytes = "vec", tag = "4")]
+    cert: Vec<u8>,
+    #[prost(bytes = "vec", tag = "5")]
+    digest: Vec<u8>,
+}
+
+#[derive(Error, Debug)]
+pub enum GoogleError {
+    #[error("HTTP: {0}")]
+    Http(String),
+    #[error("malformed launch endorsement")]
+    Endorsement,
+    #[error("endorsement verification failed: {0}")]
+    Verify(&'static str),
+    #[error("{0} does not match endorsement")]
+    Mismatch(&'static str),
+    #[error("firmware: {0}")]
+    Firmware(#[from] FirmwareError),
+}
+
+fn http_get(url: &str) -> Result<Vec<u8>, GoogleError> {
+    ureq::get(url)
+        .call()
+        .and_then(|mut r| r.body_mut().read_to_vec())
+        .map_err(|e| GoogleError::Http(e.to_string()))
+}
+
+// Checks that signature matches protobuf and is signed with Google root key
+fn verify_endorsement(
+    endorsement: &Endorsement,
+    golden: &GoldenMeasurement,
+) -> Result<(), GoogleError> {
+    let leaf =
+        X509Certificate::from_der(&golden.cert).map_err(|_| GoogleError::Verify("bad cert"))?.1;
+    let root = http_get(ROOT_CERT_URL)?;
+    let root = X509Certificate::from_der(&root).map_err(|_| GoogleError::Verify("root key"))?.1;
+    leaf.verify_signature(Some(root.public_key()))
+        .map_err(|_| GoogleError::Verify("cert chain"))?;
+
+    let key = RsaPublicKey::from_public_key_der(leaf.public_key().raw)
+        .map_err(|_| GoogleError::Verify("bad key"))?;
+    let sig = Signature::try_from(&*endorsement.signature)
+        .map_err(|_| GoogleError::Verify("signature"))?;
+    VerifyingKey::<Sha256>::new(key)
+        .verify(&endorsement.serialized_uefi_golden, &sig)
+        .map_err(|_| GoogleError::Verify("signature"))
+}
+
 #[cfg(test)]
 mod tests {
     use hex_literal::hex;
 
     use super::*;
 
+    const GIB: u64 = 1 << 30;
+
+    /// (RAM GiB, expected HOB digest) for recent GCP firmware
+    const EXPECTED_HOB: [(u64, [u8; 48]); 4] = [
+        (16, hex!("458994daa60deac8dea19dba79748f6ff93fd0aebb8e3e0be5a65eb12309d342c3ce31cc67af7bbd22af1a44e7d9fe21")),
+        (32, hex!("aa9e81feeb58a9eb3a9f4110cc7b5696240437ea4c1a9c30518cfc44fa305183e6473e6bc02ddc4de09d0c49c49fadb5")),
+        (88, hex!("a5be8ecd74020972e328fbbe94d2886817ef0d2e8a4e94e9572e8e1b221f3f608cddc868cf8b08e8e645e4aaeba68279")),
+        (176, hex!("21092eadb73948aebb405b826354c23c3025635c89a8d91f85905afb120b7d98025a6c3083e8e82b5320695b253ce341")),
+    ];
+
     #[test]
-    fn gcp_hob_digests_match_known_machine_values() {
-        const GIB: u64 = 1 << 30;
-        let firmware = DcapFirmware::gcp_hardcoded();
-        let cases = [
-            (16, hex!("458994daa60deac8dea19dba79748f6ff93fd0aebb8e3e0be5a65eb12309d342c3ce31cc67af7bbd22af1a44e7d9fe21")),
-            (32, hex!("aa9e81feeb58a9eb3a9f4110cc7b5696240437ea4c1a9c30518cfc44fa305183e6473e6bc02ddc4de09d0c49c49fadb5")),
-            (88, hex!("a5be8ecd74020972e328fbbe94d2886817ef0d2e8a4e94e9572e8e1b221f3f608cddc868cf8b08e8e645e4aaeba68279")),
-            (176, hex!("21092eadb73948aebb405b826354c23c3025635c89a8d91f85905afb120b7d98025a6c3083e8e82b5320695b253ce341")),
+    fn check_gcp_firmware() {
+        // MRTD+CFV for two GCP firmware releases
+        let releases = [
+            (
+                // MRTD from March 2026 firmware
+                hex!("8370d8f6d02f2d13e211e91c93fde923049522b241425a29a7bf0071ef49b250af4ef49d852fa3e10065d1b51dfce8fb"),
+                // CFV from March 2026 firmware
+                hex!("16a03d3d47d197945e85080880f6af2d87355f3d1eae2e27295d286e2ce7da3df4128d5d20a31d4c2cb3b20e91aecbca"),
+            ),
+            (
+                // MRTD from April 2026 firmware
+                hex!("feb7486608382c1ff0e15b4648ddc0acea6ca974eb53e3529f4c4bd5ffbaa20bf335cb75965cea65fe473aed9647c162"),
+                // CFV from April 2026 firmware
+                hex!("9cb6bf09aea7b4acb8549e328d0edd6f15defc0b00d744bb9fb5bab0962bc5c70f69d233e96dbc7c1105ba085781dc88"),
+            ),
         ];
-        for (gib, expected) in cases {
-            assert_eq!(firmware.hob.digest(gib * GIB).unwrap(), expected, "ram={gib} GiB");
+        for (mrtd, cfv) in releases {
+            let firmware = DcapFirmware::from_google(mrtd).unwrap();
+            assert_eq!(firmware.cfv, cfv, "cfv mrtd={}", hex::encode(mrtd));
+            for (gib, expected) in EXPECTED_HOB {
+                assert_eq!(
+                    firmware.hob.digest(gib * GIB).unwrap(),
+                    expected,
+                    "mrtd={} ram={gib} GiB",
+                    hex::encode(mrtd),
+                );
+            }
         }
     }
 }

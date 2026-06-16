@@ -6,7 +6,7 @@ pub mod dcap;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use measure::dcap::{DcapFirmware, ReconstructError, expected_dcap_registers};
+use measure::dcap::{DcapFirmware, GoogleError, ReconstructError, expected_dcap_registers};
 use pccs::Pccs;
 use thiserror::Error;
 #[cfg(feature = "azure")]
@@ -82,15 +82,15 @@ fn verify_portable_dcap_at(
     time: u64,
     debug: bool,
 ) -> Result<[u8; 64], VerifyError> {
+    let raw = dcap::validate_quote_at(quote, pccs, time)?;
     let firmware = match platform.attestation_type {
-        AttestationType::GcpTdx => DcapFirmware::gcp_hardcoded(),
+        AttestationType::GcpTdx => DcapFirmware::from_google(raw.mrtd)?,
         AttestationType::SelfHostedTdx => {
             let blob = firmware_blob.ok_or(VerifyError::MissingFirmware)?;
             DcapFirmware::from_blob(blob, false).map_err(ReconstructError::Firmware)?
         }
         _ => return Err(VerifyError::PlatformMismatch),
     };
-    let raw = dcap::validate_quote_at(quote, pccs, time)?;
     let expected = expected_dcap_registers(image, platform, Some(&firmware))?;
 
     let expected_mrtd = expected.mrtd.ok_or(VerifyError::IncompleteReconstruction("MRTD"))?;
@@ -226,6 +226,8 @@ pub enum VerifyError {
     Reconstruct(#[from] ReconstructError),
     #[error("DCAP: {0}")]
     Dcap(#[from] dcap::DcapError),
+    #[error("Google firmware: {0}")]
+    Google(#[from] GoogleError),
     #[cfg(feature = "azure")]
     #[error("Azure: {0}")]
     Azure(#[from] azure::error::AzureError),
