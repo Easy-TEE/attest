@@ -4,9 +4,7 @@ use std::fmt;
 
 use parity_scale_codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
-use serde_with::base64::Base64;
-use serde_with::hex::Hex;
-use serde_with::serde_as;
+use serde_with::{base64::Base64, hex::Hex, serde_as};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -120,9 +118,8 @@ pub struct PortableMeasurements {
 /// Contains expected measurements for use by verify function
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
-#[allow(clippy::large_enum_variant)]
 pub enum MeasurementOutput {
-    Portable(PortableMeasurements),
+    Portable(Box<PortableMeasurements>),
     Dcap(DcapRegisters),
     Azure(AzureRegisters),
 }
