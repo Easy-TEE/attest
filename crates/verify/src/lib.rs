@@ -66,6 +66,7 @@ pub fn verify_at(
         (MeasurementOutput::Azure(a), AttestationType::AzureTdx) => {
             verify_azure_at(a, &evidence.quote, pccs, time)
         }
+        #[cfg(feature = "azure")]
         _ => Err(VerifyError::PlatformMismatch),
     }
 }
