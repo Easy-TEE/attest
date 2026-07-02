@@ -17,6 +17,7 @@ dcap-qvl = { workspace = true }
 hex = "0.4"
 hex-literal = "1"
 thiserror = "2"
+tracing = "0.1"
 
 # Used for azure vTPM attestation verification support
 az-tdx-vtpm = { version = "0.7.4", optional = true }

@@ -200,6 +200,7 @@ dependencies = [
  "hex",
  "serde_json",
  "tokio",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -294,6 +295,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tracing",
  "x509-parser",
 ]
 
