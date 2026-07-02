@@ -1,6 +1,5 @@
 //! Self-hosted TDX measurement
 
-use anyhow::Result;
 use sha2::Sha384;
 use types::AcpiHashes;
 
@@ -8,6 +7,7 @@ use super::{
     DcapFirmware,
     DcapImageHashes,
     DcapRegisters,
+    FirmwareError,
     build_rtmr2,
     gcp::BOOT_0000_HASH,
     secure_boot::{EFI_GLOBAL_VARIABLE_GUID, EFI_IMAGE_SECURITY_DATABASE_GUID, secure_boot_hash},
@@ -30,7 +30,7 @@ pub fn build_rtmr0(
     firmware: &DcapFirmware,
     ram_bytes: u64,
     acpi: &AcpiHashes,
-) -> Result<Register<Sha384>> {
+) -> Result<Register<Sha384>, FirmwareError> {
     let global = &EFI_GLOBAL_VARIABLE_GUID;
     let db = &EFI_IMAGE_SECURITY_DATABASE_GUID;
     let mut mr = Register::new();

@@ -207,7 +207,6 @@ dependencies = [
 name = "attest-measure"
 version = "0.0.1"
 dependencies = [
- "anyhow",
  "attest-types",
  "authenticode",
  "crc32fast",

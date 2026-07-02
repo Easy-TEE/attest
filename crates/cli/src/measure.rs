@@ -73,5 +73,5 @@ fn emit<M: Measurement>(
 }
 
 fn load_uki(path: &Path) -> Result<Uki> {
-    Uki::parse(&std::fs::read(path)?)
+    Ok(Uki::parse(&std::fs::read(path)?)?)
 }

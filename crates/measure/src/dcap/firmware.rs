@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256, Sha384};
 use thiserror::Error;
 use x509_parser::prelude::*;
 
-use super::tdvf::{self, SECTION_TYPE_TD_HOB, SECTION_TYPE_TEMP_MEM};
+use super::tdvf::{self, SECTION_TYPE_TD_HOB, SECTION_TYPE_TEMP_MEM, TdvfError};
 
 const LOW_MEM_TOP: u64 = 0x8000_0000;
 const LOW_MEM_TOP_GCP: u64 = 0xC000_0000;
@@ -52,8 +52,8 @@ pub struct HobTemplate {
 pub enum FirmwareError {
     #[error("RAM ({ram_bytes:#x}) below firmware threshold ({threshold:#x})")]
     RamBelowThreshold { ram_bytes: u64, threshold: u64 },
-    #[error("TDVF parse: {0:#}")]
-    Tdvf(anyhow::Error),
+    #[error("TDVF parse: {0}")]
+    Tdvf(#[from] TdvfError),
     #[error("accepted regions extend allowed maximum: {cursor:#x} > {limit:#x}")]
     AcceptedExceedsLowMem { cursor: u64, limit: u64 },
 }
@@ -78,9 +78,8 @@ impl DcapFirmware {
         root: Option<&X509Certificate>,
     ) -> Result<Self, GoogleError> {
         let bytes = http_get(&format!("{ENDORSEMENT_BUCKET}/tdx/{}.binarypb", hex::encode(mrtd)))?;
-        let endorsement = Endorsement::decode(&*bytes).map_err(|_| GoogleError::Endorsement)?;
-        let golden = GoldenMeasurement::decode(&*endorsement.serialized_uefi_golden)
-            .map_err(|_| GoogleError::Endorsement)?;
+        let endorsement = Endorsement::decode(&*bytes)?;
+        let golden = GoldenMeasurement::decode(&*endorsement.serialized_uefi_golden)?;
         verify_endorsement(&endorsement, &golden, root)?;
 
         let fw_raw = http_get(&format!("{ENDORSEMENT_BUCKET}/{}.fd", hex::encode(&golden.digest)))?;
@@ -97,8 +96,8 @@ impl DcapFirmware {
 
     /// Derive firmware events by parsing firmware blob
     pub fn from_blob(fw: &[u8], gcp: bool) -> Result<Self, FirmwareError> {
-        let mrtd = tdvf::mrtd_sha384(fw).map_err(FirmwareError::Tdvf)?;
-        let cfv = tdvf::cfv_sha384(fw).map_err(FirmwareError::Tdvf)?;
+        let mrtd = tdvf::mrtd_sha384(fw)?;
+        let cfv = tdvf::cfv_sha384(fw)?;
         let hob = build_hob_template_from_blob(fw, gcp)?;
         Ok(Self { mrtd, cfv, hob })
     }
@@ -109,7 +108,7 @@ fn build_hob_template_from_blob(fw: &[u8], gcp: bool) -> Result<HobTemplate, Fir
 
     let mut accepted = Vec::new();
     let mut td_hob_base = DEFAULT_TD_HOB_BASE;
-    for s in tdvf::tdx_metadata_sections(fw).map_err(FirmwareError::Tdvf)? {
+    for s in tdvf::tdx_metadata_sections(fw)? {
         // QEMU only accepts TD_HOB/TEMP_MEM sections
         if gcp || matches!(s.kind, SECTION_TYPE_TD_HOB | SECTION_TYPE_TEMP_MEM) {
             accepted.push((s.memory_address, s.memory_address + s.memory_data_size));
@@ -208,10 +207,18 @@ struct GoldenMeasurement {
 pub enum GoogleError {
     #[error("HTTP: {0}")]
     Http(String),
-    #[error("malformed launch endorsement")]
-    Endorsement,
-    #[error("endorsement verification failed: {0}")]
-    Verify(&'static str),
+    #[error("malformed launch endorsement: {0}")]
+    Endorsement(#[from] prost::DecodeError),
+    #[error("endorsement certificate: {0}")]
+    Cert(#[from] x509_parser::asn1_rs::Err<x509_parser::error::X509Error>),
+    #[error("endorsement certificate expired")]
+    CertExpired,
+    #[error("certificate chain: {0}")]
+    CertChain(#[from] x509_parser::error::X509Error),
+    #[error("endorsement public key: {0}")]
+    Key(#[from] rsa::pkcs8::spki::Error),
+    #[error("endorsement signature: {0}")]
+    Signature(#[from] rsa::signature::Error),
     #[error("{0} does not match endorsement")]
     Mismatch(&'static str),
     #[error("firmware: {0}")]
@@ -234,30 +241,22 @@ fn verify_endorsement(
     golden: &GoldenMeasurement,
     root: Option<&X509Certificate>,
 ) -> Result<(), GoogleError> {
-    let leaf =
-        X509Certificate::from_der(&golden.cert).map_err(|_| GoogleError::Verify("bad cert"))?.1;
+    let leaf = X509Certificate::from_der(&golden.cert)?.1;
     if !leaf.validity().is_valid() {
-        return Err(GoogleError::Verify("expired cert"));
+        return Err(GoogleError::CertExpired);
     }
     match root {
         Some(root) => leaf.verify_signature(Some(root.public_key())),
         None => {
             let raw_cert = http_get(ROOT_CERT_URL)?;
-            let root = X509Certificate::from_der(&raw_cert)
-                .map_err(|_| GoogleError::Verify("root key"))?
-                .1;
+            let root = X509Certificate::from_der(&raw_cert)?.1;
             leaf.verify_signature(Some(root.public_key()))
         }
-    }
-    .map_err(|_| GoogleError::Verify("cert chain"))?;
+    }?;
 
-    let key = RsaPublicKey::from_public_key_der(leaf.public_key().raw)
-        .map_err(|_| GoogleError::Verify("bad key"))?;
-    let sig = Signature::try_from(&*endorsement.signature)
-        .map_err(|_| GoogleError::Verify("signature"))?;
-    VerifyingKey::<Sha256>::new(key)
-        .verify(&endorsement.serialized_uefi_golden, &sig)
-        .map_err(|_| GoogleError::Verify("signature"))
+    let key = RsaPublicKey::from_public_key_der(leaf.public_key().raw)?;
+    let sig = Signature::try_from(&*endorsement.signature)?;
+    Ok(VerifyingKey::<Sha256>::new(key).verify(&endorsement.serialized_uefi_golden, &sig)?)
 }
 
 #[cfg(test)]

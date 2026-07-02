@@ -1,6 +1,6 @@
 //! CCEL parser: extracts ACPI hashes from RTMR0 events
 
-use anyhow::{Context, Result, bail, ensure};
+use thiserror::Error;
 use types::AcpiHashes;
 
 const CCEL_PATH: &str = "/sys/firmware/acpi/tables/data/CCEL";
@@ -13,25 +13,41 @@ const TPM_ALG_SHA256: u16 = 0x000b;
 const TPM_ALG_SHA384: u16 = 0x000c;
 const TPM_ALG_SHA512: u16 = 0x000d;
 
-pub fn read_acpi_hashes() -> Result<AcpiHashes> {
-    let raw = std::fs::read(CCEL_PATH).with_context(|| format!("read {CCEL_PATH}"))?;
+#[derive(Error, Debug)]
+pub enum CcelError {
+    #[error("CCEL read: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("unexpected EOF")]
+    UnexpectedEof,
+    #[error("unknown hash algorithm {0:#06x}")]
+    UnknownHashAlgorithm(u16),
+    #[error("EV_PLATFORM_CONFIG_FLAGS missing SHA-384")]
+    MissingSha384,
+    #[error("expected 3 EV_PLATFORM_CONFIG_FLAGS in RTMR0, found {0}")]
+    BadEventCount(usize),
+}
+
+pub fn read_acpi_hashes() -> Result<AcpiHashes, CcelError> {
+    let raw = std::fs::read(CCEL_PATH)?;
     parse_acpi_hashes(&raw)
 }
 
-pub fn parse_acpi_hashes(raw: &[u8]) -> Result<AcpiHashes> {
+pub fn parse_acpi_hashes(raw: &[u8]) -> Result<AcpiHashes, CcelError> {
     let end = raw.iter().rposition(|&b| b != 0xff).map_or(0, |i| i + 1);
     let mut cur = Cursor::new(&raw[..end]);
 
-    skip_spec_id_event(&mut cur).context("spec ID event")?;
+    skip_spec_id_event(&mut cur)?;
 
     let mut acpi = Vec::with_capacity(3);
     while cur.has_remaining() {
         let event = read_event(&mut cur)?;
         if event.pcr_index == RTMR0_PCR_INDEX && event.event_type == EV_PLATFORM_CONFIG_FLAGS {
-            acpi.push(event.sha384.context("EV_PLATFORM_CONFIG_FLAGS missing SHA-384")?);
+            acpi.push(event.sha384.ok_or(CcelError::MissingSha384)?);
         }
     }
-    ensure!(acpi.len() == 3, "expected 3 EV_PLATFORM_CONFIG_FLAGS in RTMR0, found {}", acpi.len());
+    if acpi.len() != 3 {
+        return Err(CcelError::BadEventCount(acpi.len()));
+    }
     Ok(AcpiHashes { loader: acpi[0], rsdp: acpi[1], tables: acpi[2] })
 }
 
@@ -41,7 +57,7 @@ struct Event {
     sha384: Option<[u8; 48]>,
 }
 
-fn read_event(c: &mut Cursor) -> Result<Event> {
+fn read_event(c: &mut Cursor) -> Result<Event, CcelError> {
     let pcr_index = c.read_u32()?;
     let event_type = c.read_u32()?;
     let count = c.read_u32()?;
@@ -59,7 +75,7 @@ fn read_event(c: &mut Cursor) -> Result<Event> {
 }
 
 // Skips legacy SpecID event
-fn skip_spec_id_event(c: &mut Cursor) -> Result<()> {
+fn skip_spec_id_event(c: &mut Cursor) -> Result<(), CcelError> {
     c.read_u32()?; // pcr_index
     c.read_u32()?; // event_type
     c.read_bytes(20)?; // SHA-1 digest
@@ -68,13 +84,13 @@ fn skip_spec_id_event(c: &mut Cursor) -> Result<()> {
     Ok(())
 }
 
-fn digest_size(alg: u16) -> Result<usize> {
+fn digest_size(alg: u16) -> Result<usize, CcelError> {
     match alg {
         TPM_ALG_SHA1 => Ok(20),
         TPM_ALG_SHA256 => Ok(32),
         TPM_ALG_SHA384 => Ok(48),
         TPM_ALG_SHA512 => Ok(64),
-        _ => bail!("unknown hash algorithm {alg:#06x}"),
+        _ => Err(CcelError::UnknownHashAlgorithm(alg)),
     }
 }
 
@@ -90,16 +106,18 @@ impl<'a> Cursor<'a> {
     fn has_remaining(&self) -> bool {
         self.pos < self.data.len()
     }
-    fn read_bytes(&mut self, n: usize) -> Result<&'a [u8]> {
-        ensure!(self.pos + n <= self.data.len(), "unexpected EOF");
+    fn read_bytes(&mut self, n: usize) -> Result<&'a [u8], CcelError> {
+        if self.pos + n > self.data.len() {
+            return Err(CcelError::UnexpectedEof);
+        }
         let s = &self.data[self.pos..self.pos + n];
         self.pos += n;
         Ok(s)
     }
-    fn read_u16(&mut self) -> Result<u16> {
+    fn read_u16(&mut self) -> Result<u16, CcelError> {
         Ok(u16::from_le_bytes(self.read_bytes(2)?.try_into().unwrap()))
     }
-    fn read_u32(&mut self) -> Result<u32> {
+    fn read_u32(&mut self) -> Result<u32, CcelError> {
         Ok(u32::from_le_bytes(self.read_bytes(4)?.try_into().unwrap()))
     }
 }
