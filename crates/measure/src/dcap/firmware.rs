@@ -1,5 +1,6 @@
 //! Firmware-based DCAP register reconstruction inputs
 
+use std::time::Duration;
 use prost::Message;
 use rsa::{
     RsaPublicKey,
@@ -24,6 +25,8 @@ const DEFAULT_TD_HOB_BASE: u64 = 0x80_9000;
 const ENDORSEMENT_BUCKET: &str = "https://storage.googleapis.com/gce_tcb_integrity/ovmf_x64_csm";
 /// Google root certificate for verifying endorsements
 const ROOT_CERT_URL: &str = "https://pki.goog/cloud_integrity/GCE-cc-tcb-root_1.crt";
+/// ureq has no read timeout by default
+const HTTP_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Firmware-based inputs needed to rebuild MRTD and RTMR0
 #[serde_with::apply([u8; 48] => #[serde_as(as = "Hex")])]
@@ -213,6 +216,9 @@ pub enum GoogleError {
 
 fn http_get(url: &str) -> Result<Vec<u8>, GoogleError> {
     ureq::get(url)
+        .config()
+        .timeout_global(Some(HTTP_TIMEOUT))
+        .build()
         .call()
         .and_then(|mut r| r.body_mut().read_to_vec())
         .map_err(|e| GoogleError::Http(e.to_string()))
