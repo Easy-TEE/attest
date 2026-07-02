@@ -84,7 +84,7 @@ fn verify_portable_dcap_at(
 ) -> Result<[u8; 64], VerifyError> {
     let raw = dcap::validate_quote_at(quote, pccs, time)?;
     let firmware = match platform.attestation_type {
-        AttestationType::GcpTdx => DcapFirmware::from_google(raw.mrtd)?,
+        AttestationType::GcpTdx => DcapFirmware::from_google(raw.mrtd, None)?,
         AttestationType::SelfHostedTdx => {
             let blob = firmware_blob.ok_or(VerifyError::MissingFirmware)?;
             DcapFirmware::from_blob(blob, false).map_err(ReconstructError::Firmware)?

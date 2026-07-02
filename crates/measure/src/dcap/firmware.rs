@@ -72,12 +72,16 @@ impl HobTemplate {
 
 impl DcapFirmware {
     /// Download and verify firmware for a GCP MRTD, then derive events
-    pub fn from_google(mrtd: [u8; 48]) -> Result<Self, GoogleError> {
+    /// `root` overrides the endorsement root cert (fetched from pki.goog by default)
+    pub fn from_google(
+        mrtd: [u8; 48],
+        root: Option<&X509Certificate>,
+    ) -> Result<Self, GoogleError> {
         let bytes = http_get(&format!("{ENDORSEMENT_BUCKET}/tdx/{}.binarypb", hex::encode(mrtd)))?;
         let endorsement = Endorsement::decode(&*bytes).map_err(|_| GoogleError::Endorsement)?;
         let golden = GoldenMeasurement::decode(&*endorsement.serialized_uefi_golden)
             .map_err(|_| GoogleError::Endorsement)?;
-        verify_endorsement(&endorsement, &golden)?;
+        verify_endorsement(&endorsement, &golden, root)?;
 
         let fw_raw = http_get(&format!("{ENDORSEMENT_BUCKET}/{}.fd", hex::encode(&golden.digest)))?;
         if Sha384::digest(&fw_raw)[..] != golden.digest[..] {
@@ -228,13 +232,24 @@ fn http_get(url: &str) -> Result<Vec<u8>, GoogleError> {
 fn verify_endorsement(
     endorsement: &Endorsement,
     golden: &GoldenMeasurement,
+    root: Option<&X509Certificate>,
 ) -> Result<(), GoogleError> {
     let leaf =
         X509Certificate::from_der(&golden.cert).map_err(|_| GoogleError::Verify("bad cert"))?.1;
-    let root = http_get(ROOT_CERT_URL)?;
-    let root = X509Certificate::from_der(&root).map_err(|_| GoogleError::Verify("root key"))?.1;
-    leaf.verify_signature(Some(root.public_key()))
-        .map_err(|_| GoogleError::Verify("cert chain"))?;
+    if !leaf.validity().is_valid() {
+        return Err(GoogleError::Verify("expired cert"));
+    }
+    match root {
+        Some(root) => leaf.verify_signature(Some(root.public_key())),
+        None => {
+            let raw_cert = http_get(ROOT_CERT_URL)?;
+            let root = X509Certificate::from_der(&raw_cert)
+                .map_err(|_| GoogleError::Verify("root key"))?
+                .1;
+            leaf.verify_signature(Some(root.public_key()))
+        }
+    }
+    .map_err(|_| GoogleError::Verify("cert chain"))?;
 
     let key = RsaPublicKey::from_public_key_der(leaf.public_key().raw)
         .map_err(|_| GoogleError::Verify("bad key"))?;
@@ -279,7 +294,7 @@ mod tests {
             ),
         ];
         for (mrtd, cfv) in releases {
-            let firmware = DcapFirmware::from_google(mrtd).unwrap();
+            let firmware = DcapFirmware::from_google(mrtd, None).unwrap();
             assert_eq!(firmware.cfv, cfv, "cfv mrtd={}", hex::encode(mrtd));
             for (gib, expected) in EXPECTED_HOB {
                 assert_eq!(
