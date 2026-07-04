@@ -43,10 +43,10 @@ pub(crate) fn run(target: Target) -> Result<()> {
     let out = match target {
         Target::Portable { uki, no_azure } => {
             let uki = load_uki(&uki)?;
-            to_value(MeasurementOutput::Portable(PortableMeasurements {
+            to_value(MeasurementOutput::Portable(Box::new(PortableMeasurements {
                 azure: (!no_azure).then(|| measure::azure::measure(&uki).finalize()),
                 dcap: measure::dcap::measure(&uki),
-            }))?
+            })))?
         }
         Target::Azure { uki, debug } => {
             emit(measure::azure::measure(&load_uki(&uki)?), debug, MeasurementOutput::Azure)?
@@ -73,5 +73,5 @@ fn emit<M: Measurement>(
 }
 
 fn load_uki(path: &Path) -> Result<Uki> {
-    Uki::parse(&std::fs::read(path)?)
+    Ok(Uki::parse(&std::fs::read(path)?)?)
 }

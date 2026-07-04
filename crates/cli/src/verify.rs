@@ -6,6 +6,7 @@ use std::{
 use anyhow::{Result, bail};
 use clap::Parser;
 use pccs::Pccs;
+use tracing_subscriber::filter::LevelFilter;
 use types::{AttestationEvidence, MeasurementOutput};
 
 #[derive(Parser)]
@@ -32,6 +33,9 @@ pub(crate) struct Args {
 }
 
 pub(crate) fn run(args: Args) -> Result<()> {
+    let level = if args.debug { LevelFilter::DEBUG } else { LevelFilter::WARN };
+    tracing_subscriber::fmt().with_max_level(level).with_writer(std::io::stderr).init();
+
     let expected: MeasurementOutput = serde_json::from_slice(&std::fs::read(&args.measurement)?)?;
     let evidence: AttestationEvidence = serde_json::from_slice(&read_evidence(args.evidence)?)?;
     let firmware = args.firmware.map(std::fs::read).transpose()?;
@@ -43,8 +47,7 @@ pub(crate) fn run(args: Args) -> Result<()> {
         anyhow::Ok(pccs)
     })?;
 
-    let report_data =
-        verify::verify(&expected, &evidence, &pccs, firmware.as_deref(), args.debug)?;
+    let report_data = verify::verify(&expected, &evidence, &pccs, firmware.as_deref())?;
     println!("{}", hex::encode(report_data));
     Ok(())
 }

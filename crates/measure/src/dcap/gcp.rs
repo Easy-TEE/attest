@@ -1,11 +1,10 @@
 //! GCP TDX measurement
 
-use anyhow::{Result, ensure};
 use hex_literal::hex;
 use sha2::Sha384;
 use types::AcpiHashes;
 
-use super::{DcapFirmware, DcapImageHashes, DcapRegisters, build_rtmr2, secure_boot};
+use super::{DcapFirmware, DcapImageHashes, DcapRegisters, FirmwareError, build_rtmr2, secure_boot};
 use crate::event::{
     CALLING_EFI_APP,
     EXIT_BOOT_SERVICES,
@@ -44,8 +43,10 @@ pub fn build_rtmr0(
     ram_bytes: u64,
     acpi: &AcpiHashes,
     num_disks: u32,
-) -> Result<Register<Sha384>> {
-    ensure!(num_disks <= 1, "num_disks > 1 not yet supported"); // TODO
+) -> Result<Register<Sha384>, FirmwareError> {
+    if num_disks > 1 {
+        todo!("num_disks > 1");
+    }
     let mut mr = Register::new();
     mr.extend_raw(firmware.hob.digest(ram_bytes)?, "TD HOB");
     mr.extend_raw(firmware.cfv, "CFV image");

@@ -5,11 +5,18 @@ pub mod azure;
 
 use measure::platform;
 use thiserror::Error;
-use types::{AttestationEvidence, AttestationType};
+use types::{AttestationEvidence, AttestationType, PlatformMetadata};
 
 /// Generate an attestation for the current CVM and gather platform metadata
 pub fn prove(input_data: [u8; 64]) -> Result<AttestationEvidence, ProveError> {
-    let platform = platform::metadata()?;
+    prove_with_metadata(platform::metadata()?, input_data)
+}
+
+/// Generate an attestation using preexisting platform metadata
+pub fn prove_with_metadata(
+    platform: PlatformMetadata,
+    input_data: [u8; 64],
+) -> Result<AttestationEvidence, ProveError> {
     let quote = match platform.attestation_type {
         AttestationType::GcpTdx | AttestationType::SelfHostedTdx => {
             tdx_attest::get_quote(&input_data)?

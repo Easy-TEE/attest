@@ -3,14 +3,14 @@
 use thiserror::Error;
 use types::{AttestationType, PlatformMetadata};
 
-use crate::ccel;
+use crate::ccel::{self, CcelError};
 
 #[derive(Error, Debug)]
 pub enum PlatformError {
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
-    #[error("CCEL: {0:#}")]
-    Ccel(anyhow::Error),
+    #[error("CCEL: {0}")]
+    Ccel(#[from] CcelError),
 }
 
 /// Identify the host platform and read system specs
@@ -22,7 +22,7 @@ pub fn metadata() -> Result<PlatformMetadata, PlatformError> {
 pub fn metadata_for(attestation_type: AttestationType) -> Result<PlatformMetadata, PlatformError> {
     let acpi = match attestation_type {
         AttestationType::GcpTdx | AttestationType::SelfHostedTdx => {
-            Some(ccel::read_acpi_hashes().map_err(PlatformError::Ccel)?)
+            Some(ccel::read_acpi_hashes()?)
         }
         _ => None,
     };

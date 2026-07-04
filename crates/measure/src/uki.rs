@@ -1,7 +1,15 @@
-use anyhow::{Context, Result};
-use authenticode::authenticode_digest;
+use authenticode::{PeOffsetError, authenticode_digest};
 use object::{Object, ObjectSection, read::pe::PeFile64};
 use sha2::{Digest, Sha256, Sha384};
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum UkiError {
+    #[error("PE parse: {0}")]
+    Pe(#[from] object::read::Error),
+    #[error("authenticode digest: {0}")]
+    Authenticode(#[from] PeOffsetError),
+}
 
 /// Parsed UKI with pre-computed digests
 pub struct Uki {
@@ -28,8 +36,8 @@ const UKI_MEASURED_SECTIONS: &[&str] =
     &[".linux", ".osrel", ".cmdline", ".initrd", ".splash", ".dtb", ".uname", ".sbat", ".pcrkey"];
 
 impl Uki {
-    pub fn parse(data: &[u8]) -> Result<Self> {
-        let pe = PeFile64::parse(data).context("invalid UKI PE")?;
+    pub fn parse(data: &[u8]) -> Result<Self, UkiError> {
+        let pe = PeFile64::parse(data)?;
 
         let mut sections = Vec::new();
         let mut cmdline = Vec::new();
@@ -101,17 +109,17 @@ pub fn to_utf16le_null_terminated(input: &[u8]) -> Vec<u8> {
     out
 }
 
-fn pe_authenticode_sha384(data: &[u8]) -> Result<[u8; 48]> {
-    let pe = PeFile64::parse(data).context("failed to parse PE")?;
+fn pe_authenticode_sha384(data: &[u8]) -> Result<[u8; 48], UkiError> {
+    let pe = PeFile64::parse(data)?;
     let mut h = Sha384::new();
-    authenticode_digest(&pe, &mut h).context("authenticode digest failed")?;
+    authenticode_digest(&pe, &mut h)?;
     Ok(h.finalize().into())
 }
 
-fn pe_authenticode_sha256(data: &[u8]) -> Result<[u8; 32]> {
-    let pe = PeFile64::parse(data).context("failed to parse PE")?;
+fn pe_authenticode_sha256(data: &[u8]) -> Result<[u8; 32], UkiError> {
+    let pe = PeFile64::parse(data)?;
     let mut h = Sha256::new();
-    authenticode_digest(&pe, &mut h).context("authenticode digest failed")?;
+    authenticode_digest(&pe, &mut h)?;
     Ok(h.finalize().into())
 }
 

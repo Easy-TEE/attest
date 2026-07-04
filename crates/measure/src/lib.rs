@@ -10,7 +10,7 @@ pub mod uki;
 use serde::Serialize;
 use types::PortableMeasurements;
 
-use self::uki::Uki;
+use self::uki::{Uki, UkiError};
 
 /// A computed measurement with both an annotated form
 /// and a form with only the final digest values
@@ -21,7 +21,7 @@ pub trait Measurement {
 }
 
 /// Produces a portable measurement from a UKI file
-pub fn measure(uki_data: &[u8]) -> anyhow::Result<PortableMeasurements> {
+pub fn measure(uki_data: &[u8]) -> Result<PortableMeasurements, UkiError> {
     let uki = Uki::parse(uki_data)?;
     Ok(PortableMeasurements {
         azure: Some(azure::measure(&uki).finalize()),

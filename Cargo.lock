@@ -200,13 +200,13 @@ dependencies = [
  "hex",
  "serde_json",
  "tokio",
+ "tracing-subscriber",
 ]
 
 [[package]]
 name = "attest-measure"
 version = "0.0.1"
 dependencies = [
- "anyhow",
  "attest-types",
  "authenticode",
  "crc32fast",
@@ -294,6 +294,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tracing",
  "x509-parser",
 ]
 

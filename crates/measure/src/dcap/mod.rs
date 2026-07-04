@@ -11,7 +11,7 @@ mod tdvf;
 pub use firmware::{DcapFirmware, FirmwareError, GoogleError, HobTemplate};
 use serde::Serialize;
 use sha2::{Digest, Sha384};
-pub use tdvf::mrtd_sha384;
+pub use tdvf::{TdvfError, mrtd_sha384};
 use thiserror::Error;
 pub use types::DcapImageHashes;
 use types::{AttestationType, PlatformMetadata};
@@ -88,8 +88,6 @@ pub enum ReconstructError {
     MissingFirmware,
     #[error("firmware: {0}")]
     Firmware(#[from] FirmwareError),
-    #[error("register rebuild: {0:#}")]
-    Rebuild(#[from] anyhow::Error),
 }
 
 /// Reconstruct expected DCAP registers from image hashes/platform metadata
