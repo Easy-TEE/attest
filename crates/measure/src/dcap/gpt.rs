@@ -51,7 +51,7 @@ pub(super) fn disk_guid_hash(uki_size: u64) -> [u8; 48] {
 }
 
 /// Calculate UEFI GPT event hash from rootfs disk image GPT header
-pub(super) fn disk_guid_hash_from_header(raw: &[u8]) -> [u8; 48] {
+pub(crate) fn disk_guid_hash_from_header(raw: &[u8]) -> [u8; 48] {
     const SECTOR: usize = 512;
     let header = &raw[SECTOR..SECTOR + 92];
     let num_entries =
