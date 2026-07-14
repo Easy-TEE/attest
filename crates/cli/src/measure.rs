@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::Subcommand;
-use measure::{Measurement, uki::Uki};
+use measure::{Measurement, get_rootfs_header, uki::Uki};
 use serde_json::{Value, to_string_pretty, to_value};
 use types::{MeasurementOutput, PortableMeasurements};
 
@@ -15,6 +15,9 @@ pub(crate) enum Target {
         /// Omit the Azure PCR section (for non-Azure targets)
         #[arg(long)]
         no_azure: bool,
+        /// Optional rootfs disk image (defaults to `<uki>.raw` if present)
+        #[arg(long)]
+        raw: Option<PathBuf>,
     },
     /// Azure vTPM PCR values
     Azure {
@@ -29,6 +32,9 @@ pub(crate) enum Target {
         uki: PathBuf,
         #[arg(long)]
         debug: bool,
+        /// Optional rootfs disk image (defaults to `<uki>.raw` if present)
+        #[arg(long)]
+        raw: Option<PathBuf>,
     },
     /// Static self-hosted TDX register values
     SelfHosted {
@@ -36,27 +42,33 @@ pub(crate) enum Target {
         uki: PathBuf,
         #[arg(long)]
         debug: bool,
+        /// Optional rootfs disk image (defaults to `<uki>.raw` if present)
+        #[arg(long)]
+        raw: Option<PathBuf>,
     },
 }
 
 pub(crate) fn run(target: Target) -> Result<()> {
     let out = match target {
-        Target::Portable { uki, no_azure } => {
+        Target::Portable { uki, no_azure, raw } => {
+            let gpt = load_gpt(&uki, raw.as_deref())?;
             let uki = load_uki(&uki)?;
             to_value(MeasurementOutput::Portable(Box::new(PortableMeasurements {
                 azure: (!no_azure).then(|| measure::azure::measure(&uki).finalize()),
-                dcap: measure::dcap::measure(&uki),
+                dcap: measure::dcap::measure(&uki, gpt.as_deref()),
             })))?
         }
         Target::Azure { uki, debug } => {
             emit(measure::azure::measure(&load_uki(&uki)?), debug, MeasurementOutput::Azure)?
         }
-        Target::Gcp { uki, debug } => {
-            let hashes = measure::dcap::measure(&load_uki(&uki)?);
+        Target::Gcp { uki, debug, raw } => {
+            let gpt = load_gpt(&uki, raw.as_deref())?;
+            let hashes = measure::dcap::measure(&load_uki(&uki)?, gpt.as_deref());
             emit(measure::dcap::gcp::measure(&hashes), debug, MeasurementOutput::Dcap)?
         }
-        Target::SelfHosted { uki, debug } => {
-            let hashes = measure::dcap::measure(&load_uki(&uki)?);
+        Target::SelfHosted { uki, debug, raw } => {
+            let gpt = load_gpt(&uki, raw.as_deref())?;
+            let hashes = measure::dcap::measure(&load_uki(&uki)?, gpt.as_deref());
             emit(measure::dcap::self_hosted::measure(&hashes), debug, MeasurementOutput::Dcap)?
         }
     };
@@ -74,4 +86,14 @@ fn emit<M: Measurement>(
 
 fn load_uki(path: &Path) -> Result<Uki> {
     Ok(Uki::parse(&std::fs::read(path)?)?)
+}
+
+fn load_gpt(uki: &Path, raw: Option<&Path>) -> Result<Option<Vec<u8>>> {
+    let sibling_file = uki.with_extension("raw");
+    let path = match raw {
+        Some(p) => p,
+        None if sibling_file.exists() => sibling_file.as_path(),
+        _ => return Ok(None),
+    };
+    Ok(Some(get_rootfs_header(path)?.to_vec()))
 }

@@ -50,6 +50,28 @@ pub(super) fn disk_guid_hash(uki_size: u64) -> [u8; 48] {
     Sha384::digest(&blob).into()
 }
 
+/// Calculate UEFI GPT event hash from rootfs disk image GPT header
+pub(super) fn disk_guid_hash_from_header(raw: &[u8]) -> [u8; 48] {
+    const SECTOR: usize = 512;
+    let header = &raw[SECTOR..SECTOR + 92];
+    let num_entries =
+        u32::from_le_bytes(raw[SECTOR + 80..SECTOR + 84].try_into().unwrap()) as usize;
+    let entry_size = u32::from_le_bytes(raw[SECTOR + 84..SECTOR + 88].try_into().unwrap()) as usize;
+    let array = &raw[2 * SECTOR..2 * SECTOR + num_entries * entry_size];
+
+    // Skip partitions with type GUID 000...
+    let used: Vec<&[u8]> =
+        array.chunks_exact(entry_size).filter(|e| e[..16].iter().any(|&b| b != 0)).collect();
+
+    let mut blob = Vec::with_capacity(92 + 8 + used.len() * entry_size);
+    blob.extend_from_slice(header);
+    blob.extend_from_slice(&(used.len() as u64).to_le_bytes());
+    for e in &used {
+        blob.extend_from_slice(e);
+    }
+    Sha384::digest(&blob).into()
+}
+
 /// 92-byte GPT primary header with empty HeaderCRC32
 fn build_header(disk_size_sectors: u64, partition_array_crc: u32) -> Vec<u8> {
     let mut h = Vec::with_capacity(92);

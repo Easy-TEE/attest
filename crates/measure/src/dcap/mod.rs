@@ -44,14 +44,17 @@ impl Measurement for DcapRegisters {
     }
 }
 
-/// Produces portable image hashes from a UKI
-pub fn measure(uki: &Uki) -> DcapImageHashes {
+/// Produces portable image hashes from a UKI and optional rootfs disk image
+pub fn measure(uki: &Uki, rootfs: Option<&[u8]>) -> DcapImageHashes {
     DcapImageHashes {
         uki_authenticode: uki.authenticode_sha384,
         kernel_authenticode: uki.kernel_authenticode_sha384,
         cmdline_hash: sha384(&to_utf16le_null_terminated(&uki.cmdline)),
         initrd_hash: uki.section(".initrd").expect("UKI missing .initrd section").digest_sha384,
-        gpt_disk_guid_hash: gpt::disk_guid_hash(uki.size),
+        gpt_disk_guid_hash: match rootfs {
+            Some(rootfs) => gpt::disk_guid_hash_from_header(rootfs),
+            None => gpt::disk_guid_hash(uki.size),
+        },
     }
 }
 
