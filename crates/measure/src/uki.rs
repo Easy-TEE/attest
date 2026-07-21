@@ -1,3 +1,5 @@
+use std::io::{Cursor, Read};
+
 use authenticode::{PeOffsetError, authenticode_digest};
 use object::{Object, ObjectSection, read::pe::PeFile64};
 use sha2::{Digest, Sha256, Sha384};
@@ -9,6 +11,8 @@ pub enum UkiError {
     Pe(#[from] object::read::Error),
     #[error("authenticode digest: {0}")]
     Authenticode(#[from] PeOffsetError),
+    #[error("disk image: {0}")]
+    Disk(&'static str),
 }
 
 /// Parsed UKI with pre-computed digests
@@ -20,6 +24,8 @@ pub struct Uki {
     pub kernel_authenticode_sha384: [u8; 48],
     pub kernel_authenticode_sha256: [u8; 32],
     pub cmdline: Vec<u8>,
+    /// Only needed when the UKI is embedded in a disk image with a rootfs
+    pub disk_guid_hash: Option<[u8; 48]>,
 }
 
 pub struct UkiSection {
@@ -36,7 +42,23 @@ const UKI_MEASURED_SECTIONS: &[&str] =
     &[".linux", ".osrel", ".cmdline", ".initrd", ".splash", ".dtb", ".uname", ".sbat", ".pcrkey"];
 
 impl Uki {
+    /// Parse a UKI file (`.efi`) or a disk image (`.raw` / `.tar.gz`)
+    /// Disk images are only needed when there's a separate rootfs
     pub fn parse(data: &[u8]) -> Result<Self, UkiError> {
+        if data.starts_with(&[0x1f, 0x8b]) {
+            // GCP .tar.gz containing .raw disk image containing UKI
+            Self::parse(&untar_disk_raw(data)?)
+        } else if data.get(512..520) == Some(b"EFI PART".as_slice()) {
+            // .raw disk image containing UKI
+            let disk_guid_hash = crate::dcap::gpt::disk_guid_hash_from_header(data);
+            Self::parse_pe(&extract_uki(data)?, Some(disk_guid_hash))
+        } else {
+            // Only UKI with no rootfs
+            Self::parse_pe(data, None)
+        }
+    }
+
+    fn parse_pe(data: &[u8], disk_guid_hash: Option<[u8; 48]>) -> Result<Self, UkiError> {
         let pe = PeFile64::parse(data)?;
 
         let mut sections = Vec::new();
@@ -81,6 +103,7 @@ impl Uki {
             kernel_authenticode_sha256,
             sections,
             cmdline,
+            disk_guid_hash,
         })
     }
 
@@ -129,4 +152,35 @@ fn section_measure_order(name: &str) -> Option<usize> {
 
 fn should_measure(name: &str) -> bool {
     UKI_MEASURED_SECTIONS.contains(&name) && name != ".pcrsig"
+}
+
+/// Extract `disk.raw` from a GCP .tar.gz
+fn untar_disk_raw(targz: &[u8]) -> Result<Vec<u8>, UkiError> {
+    let err = |_| UkiError::Disk("invalid tar.gz");
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(targz));
+    let mut entry = archive
+        .entries()
+        .map_err(err)?
+        .next()
+        .ok_or(UkiError::Disk("empty tar.gz"))?
+        .map_err(err)?;
+    let mut raw = Vec::new();
+    entry.read_to_end(&mut raw).map_err(err)?;
+    Ok(raw)
+}
+
+// Extract UKI from a disk image
+fn extract_uki(disk: &[u8]) -> Result<Vec<u8>, UkiError> {
+    let entry = disk.get(1024..1152).ok_or(UkiError::Disk("no partition table"))?; // LBA 2
+    let start = u64::from_le_bytes(entry[32..40].try_into().unwrap()) as usize;
+    let end = u64::from_le_bytes(entry[40..48].try_into().unwrap()) as usize;
+    let esp = disk.get(start * 512..(end + 1) * 512).ok_or(UkiError::Disk("bad ESP bounds"))?;
+    let fs = fatfs::FileSystem::new(Cursor::new(esp.to_vec()), fatfs::FsOptions::new())
+        .map_err(|_| UkiError::Disk("invalid ESP filesystem"))?;
+    let mut uki = Vec::new();
+    fs.root_dir()
+        .open_file("EFI/BOOT/BOOTX64.EFI")
+        .and_then(|mut f| f.read_to_end(&mut uki))
+        .map_err(|_| UkiError::Disk("could not read UKI from ESP"))?;
+    Ok(uki)
 }
