@@ -50,7 +50,8 @@ impl Uki {
             Self::parse(&untar_disk_raw(data)?)
         } else if data.get(512..520) == Some(b"EFI PART".as_slice()) {
             // .raw disk image containing UKI
-            let disk_guid_hash = crate::dcap::gpt::disk_guid_hash_from_header(data);
+            let disk_guid_hash =
+                crate::dcap::gpt::disk_guid_hash_from_header(data).map_err(UkiError::Disk)?;
             Self::parse_pe(&extract_uki(data)?, Some(disk_guid_hash))
         } else {
             // Only UKI with no rootfs

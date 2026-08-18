@@ -51,13 +51,17 @@ pub(super) fn disk_guid_hash(uki_size: u64) -> [u8; 48] {
 }
 
 /// Calculate UEFI GPT event hash from rootfs disk image GPT header
-pub(crate) fn disk_guid_hash_from_header(raw: &[u8]) -> [u8; 48] {
+pub(crate) fn disk_guid_hash_from_header(raw: &[u8]) -> Result<[u8; 48], &'static str> {
     const SECTOR: usize = 512;
-    let header = &raw[SECTOR..SECTOR + 92];
-    let num_entries =
-        u32::from_le_bytes(raw[SECTOR + 80..SECTOR + 84].try_into().unwrap()) as usize;
-    let entry_size = u32::from_le_bytes(raw[SECTOR + 84..SECTOR + 88].try_into().unwrap()) as usize;
-    let array = &raw[2 * SECTOR..2 * SECTOR + num_entries * entry_size];
+    let header = raw.get(SECTOR..SECTOR + 92).ok_or("GPT header out of bounds")?;
+    let num_entries = u32::from_le_bytes(header[80..84].try_into().unwrap()) as usize;
+    let entry_size = u32::from_le_bytes(header[84..88].try_into().unwrap()) as usize;
+    if entry_size < 16 {
+        return Err("GPT partition entry size too small");
+    }
+    let array_len = num_entries.checked_mul(entry_size).ok_or("GPT partition array overflow")?;
+    let array =
+        raw.get(2 * SECTOR..2 * SECTOR + array_len).ok_or("GPT partition array out of bounds")?;
 
     // Skip partitions with type GUID 000...
     let used: Vec<&[u8]> =
@@ -69,7 +73,7 @@ pub(crate) fn disk_guid_hash_from_header(raw: &[u8]) -> [u8; 48] {
     for e in &used {
         blob.extend_from_slice(e);
     }
-    Sha384::digest(&blob).into()
+    Ok(Sha384::digest(&blob).into())
 }
 
 /// 92-byte GPT primary header with empty HeaderCRC32
