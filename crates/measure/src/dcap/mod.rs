@@ -6,7 +6,7 @@ pub mod gcp;
 pub mod secure_boot;
 pub mod self_hosted;
 
-mod gpt;
+pub(crate) mod gpt;
 mod tdvf;
 pub use firmware::{DcapFirmware, FirmwareError, GoogleError, HobTemplate};
 use serde::Serialize;
@@ -51,7 +51,7 @@ pub fn measure(uki: &Uki) -> DcapImageHashes {
         kernel_authenticode: uki.kernel_authenticode_sha384,
         cmdline_hash: sha384(&to_utf16le_null_terminated(&uki.cmdline)),
         initrd_hash: uki.section(".initrd").expect("UKI missing .initrd section").digest_sha384,
-        gpt_disk_guid_hash: gpt::disk_guid_hash(uki.size),
+        gpt_disk_guid_hash: uki.disk_guid_hash.unwrap_or_else(|| gpt::disk_guid_hash(uki.size)),
     }
 }
 

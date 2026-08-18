@@ -20,7 +20,7 @@ pub trait Measurement {
     fn debug_json(&self) -> serde_json::Value;
 }
 
-/// Produces a portable measurement from a UKI file
+/// Produces portable measurement from `.efi`, `.raw`, or `.tar.gz` image
 pub fn measure(uki_data: &[u8]) -> Result<PortableMeasurements, UkiError> {
     let uki = Uki::parse(uki_data)?;
     Ok(PortableMeasurements {
