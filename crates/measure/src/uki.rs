@@ -24,6 +24,7 @@ pub struct Uki {
     pub kernel_authenticode_sha384: [u8; 48],
     pub kernel_authenticode_sha256: [u8; 32],
     pub cmdline: Vec<u8>,
+    pub stub_version: Option<u32>,
     /// Only needed when the UKI is embedded in a disk image with a rootfs
     pub disk_guid_hash: Option<[u8; 48]>,
 }
@@ -64,6 +65,7 @@ impl Uki {
 
         let mut sections = Vec::new();
         let mut cmdline = Vec::new();
+        let mut stub_version = None;
         let mut kernel_authenticode_sha384 = [0u8; 48];
         let mut kernel_authenticode_sha256 = [0u8; 32];
 
@@ -75,6 +77,7 @@ impl Uki {
 
             match name.as_str() {
                 ".cmdline" => cmdline = section_data.to_vec(),
+                ".sdmagic" => stub_version = parse_stub_version(section_data),
                 ".linux" => {
                     kernel_authenticode_sha384 = pe_authenticode_sha384(section_data)?;
                     kernel_authenticode_sha256 = pe_authenticode_sha256(section_data)?;
@@ -105,11 +108,17 @@ impl Uki {
             sections,
             cmdline,
             disk_guid_hash,
+            stub_version,
         })
     }
 
     pub fn section(&self, name: &str) -> Option<&UkiSection> {
         self.sections.iter().find(|s| s.name == name)
+    }
+
+    /// Returns true if the systemd stub is recent enough to measure UKI sections
+    pub fn has_recent_stub(&self) -> bool {
+        self.stub_version.is_some_and(|v| v >= 256)
     }
 }
 
@@ -185,3 +194,12 @@ fn extract_uki(disk: &[u8]) -> Result<Vec<u8>, UkiError> {
         .map_err(|_| UkiError::Disk("could not read UKI from ESP"))?;
     Ok(uki)
 }
+
+/// Parse systemd-stub version from `.sdmagic` section contents
+fn parse_stub_version(sdmagic: &[u8]) -> Option<u32> {
+    let text = String::from_utf8_lossy(sdmagic);
+    let digits: String =
+        text.split("systemd-stub ").nth(1)?.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+

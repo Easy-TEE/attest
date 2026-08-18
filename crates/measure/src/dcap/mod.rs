@@ -52,15 +52,25 @@ pub fn measure(uki: &Uki) -> DcapImageHashes {
         cmdline_hash: sha384(&to_utf16le_null_terminated(&uki.cmdline)),
         initrd_hash: uki.section(".initrd").expect("UKI missing .initrd section").digest_sha384,
         gpt_disk_guid_hash: uki.disk_guid_hash.unwrap_or_else(|| gpt::disk_guid_hash(uki.size)),
+        pe_sections: uki.has_recent_stub().then(|| pe_sections_hash(uki)),
     }
 }
 
 /// RTMR2 from portable image hashes (identical on GCP and self-hosted)
 pub fn build_rtmr2(hashes: &DcapImageHashes) -> Register<Sha384> {
-    let mut mr = Register::new();
+    let mut mr = hashes.pe_sections.map_or_else(Register::new, Register::from_value);
     mr.extend_raw(hashes.cmdline_hash, "cmdline (UTF-16LE)");
     mr.extend_raw(hashes.initrd_hash, "initrd");
     mr
+}
+
+fn pe_sections_hash(uki: &Uki) -> [u8; 48] {
+    let mut mr = Register::<Sha384>::new();
+    for section in uki.sections.iter().filter(|s| s.measured) {
+        mr.extend(&section.null_terminated_name(), "section name");
+        mr.extend_raw(section.digest_sha384, "section data");
+    }
+    mr.value()
 }
 
 pub(crate) fn sha384(data: &[u8]) -> [u8; 48] {

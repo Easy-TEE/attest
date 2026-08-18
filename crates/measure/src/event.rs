@@ -84,6 +84,11 @@ impl<H: HashAlg> Register<H> {
         Self::default()
     }
 
+    /// Start from a pre-computed value instead of zero
+    pub fn from_value(value: H::Array) -> Self {
+        Self { value, ..Self::default() }
+    }
+
     /// Extend with a pre-computed hash (e.g. a
     /// [`UkiSection`](super::uki::UkiSection) digest)
     pub fn extend_raw(&mut self, hash: H::Array, description: impl Into<String>) -> &mut Self {

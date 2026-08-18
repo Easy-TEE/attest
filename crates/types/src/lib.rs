@@ -95,6 +95,9 @@ pub struct DcapImageHashes {
     pub cmdline_hash: [u8; 48],
     pub initrd_hash: [u8; 48],
     pub gpt_disk_guid_hash: [u8; 48],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde_as(as = "Option<Hex>")]
+    pub pe_sections: Option<[u8; 48]>,
 }
 
 /// Image-dependent DCAP register values
