@@ -11,6 +11,8 @@ pub enum PlatformError {
     Io(#[from] std::io::Error),
     #[error("CCEL: {0}")]
     Ccel(#[from] CcelError),
+    #[error("Detected {detected_disks} disks is less than the {extra_disks} platform disks")]
+    TooFewDisks { detected_disks: u32, extra_disks: u32 },
 }
 
 /// Identify the host platform and read system specs
@@ -21,9 +23,7 @@ pub fn metadata() -> Result<PlatformMetadata, PlatformError> {
 /// Read system specs for a given platform, skipping DMI-based detection
 pub fn metadata_for(attestation_type: AttestationType) -> Result<PlatformMetadata, PlatformError> {
     let acpi = match attestation_type {
-        AttestationType::GcpTdx | AttestationType::SelfHostedTdx => {
-            Some(ccel::read_acpi_hashes()?)
-        }
+        AttestationType::GcpTdx | AttestationType::SelfHostedTdx => Some(ccel::read_acpi_hashes()?),
         _ => None,
     };
     let extra_disks = match attestation_type {
@@ -31,7 +31,12 @@ pub fn metadata_for(attestation_type: AttestationType) -> Result<PlatformMetadat
         AttestationType::AzureTdx => 1,
         _ => 0,
     };
-    let num_disks = num_disks()? - extra_disks;
+    let detected_disks = num_disks()?;
+
+    let num_disks = detected_disks
+        .checked_sub(extra_disks)
+        .ok_or(PlatformError::TooFewDisks { detected_disks, extra_disks })?;
+
     let ram_bytes = ram_bytes()?;
     Ok(PlatformMetadata { attestation_type, ram_bytes, num_disks, acpi })
 }
@@ -85,9 +90,33 @@ fn num_disks() -> Result<u32, PlatformError> {
     for entry in std::fs::read_dir("/sys/block")? {
         let name = entry?.file_name();
         let name = name.to_string_lossy();
-        if !(name.starts_with("loop") || name.starts_with("ram") || name.starts_with("zram")) {
+        if !is_virtual_block_device(&name) {
             n += 1;
         }
     }
     Ok(n)
+}
+
+/// Exclude virtual devices when counting the number of disks
+fn is_virtual_block_device(name: &str) -> bool {
+    ["dm-", "loop", "md", "ram", "zram"].iter().any(|prefix| name.starts_with(prefix))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identifies_virtual_block_devices() {
+        for name in ["dm-0", "loop0", "md0", "ram0", "zram0"] {
+            assert!(is_virtual_block_device(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn identifies_physical_block_devices() {
+        for name in ["nvme0n1", "sda", "vda"] {
+            assert!(!is_virtual_block_device(name), "{name}");
+        }
+    }
 }
