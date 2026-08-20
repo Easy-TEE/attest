@@ -1,6 +1,8 @@
 //! Firmware-based DCAP register reconstruction inputs
 
 use std::time::Duration;
+
+use hex_literal::hex;
 use prost::Message;
 use rsa::{
     RsaPublicKey,
@@ -27,6 +29,9 @@ const ENDORSEMENT_BUCKET: &str = "https://storage.googleapis.com/gce_tcb_integri
 const ROOT_CERT_URL: &str = "https://pki.goog/cloud_integrity/GCE-cc-tcb-root_1.crt";
 /// ureq has no read timeout by default
 const HTTP_TIMEOUT: Duration = Duration::from_secs(60);
+
+pub const BOOT_0000_HASH: [u8; 48] =
+    hex!("23ADA07F5261F12F34A0BD8E46760962D6B4D576A416F1FEA1C64BC656B1D28EACF7047AE6E967C58FD2A98BFA74C298");
 
 /// Firmware-based inputs needed to rebuild MRTD and RTMR0
 #[serde_with::apply([u8; 48] => #[serde_as(as = "Hex")])]
@@ -72,7 +77,8 @@ impl HobTemplate {
 
 impl DcapFirmware {
     /// Download and verify firmware for a GCP MRTD, then derive events
-    /// `root` overrides the endorsement root cert (fetched from pki.goog by default)
+    /// `root` overrides the endorsement root cert (fetched from pki.goog by
+    /// default)
     pub fn from_google(
         mrtd: [u8; 48],
         root: Option<&X509Certificate>,

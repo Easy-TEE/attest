@@ -22,9 +22,12 @@ pub fn metadata() -> Result<PlatformMetadata, PlatformError> {
 
 /// Read system specs for a given platform, skipping DMI-based detection
 pub fn metadata_for(attestation_type: AttestationType) -> Result<PlatformMetadata, PlatformError> {
-    let acpi = match attestation_type {
-        AttestationType::GcpTdx | AttestationType::SelfHostedTdx => Some(ccel::read_acpi_hashes()?),
-        _ => None,
+    let (acpi, smbios_handoff, dm_verity_boot) = match attestation_type {
+        AttestationType::GcpTdx | AttestationType::SelfHostedTdx => {
+            let info = ccel::read_ccel()?;
+            (Some(info.acpi), info.smbios_handoff, info.dm_verity_boot)
+        }
+        _ => (None, None, false),
     };
     let extra_disks = match attestation_type {
         AttestationType::GcpTdx => 2,
@@ -38,7 +41,14 @@ pub fn metadata_for(attestation_type: AttestationType) -> Result<PlatformMetadat
         .ok_or(PlatformError::TooFewDisks { detected_disks, extra_disks })?;
 
     let ram_bytes = ram_bytes()?;
-    Ok(PlatformMetadata { attestation_type, ram_bytes, num_disks, acpi })
+    Ok(PlatformMetadata {
+        attestation_type,
+        ram_bytes,
+        num_disks,
+        acpi,
+        smbios_handoff,
+        dm_verity_boot,
+    })
 }
 
 /// Identify the host platform from DMI/SMBIOS strings

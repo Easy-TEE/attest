@@ -5,12 +5,9 @@ use sha2::Sha384;
 use types::AcpiHashes;
 
 use super::{DcapFirmware, DcapImageHashes, DcapRegisters, FirmwareError, build_rtmr2, secure_boot};
-use crate::event::{
-    CALLING_EFI_APP,
-    EXIT_BOOT_SERVICES,
-    EXIT_BOOT_SERVICES_SUCCESS,
-    Register,
-    SEPARATOR,
+use crate::{
+    dcap::firmware::BOOT_0000_HASH,
+    event::{CALLING_EFI_APP, EXIT_BOOT_SERVICES, EXIT_BOOT_SERVICES_SUCCESS, Register, SEPARATOR},
 };
 
 /// EFI Boot variable hashes
@@ -19,9 +16,6 @@ pub const BOOT_0001_HASH: [u8; 48] = hex!(
 );
 pub const BOOT_0002_HASH: [u8; 48] = hex!(
     "9068065754FF3AE3DD58A5897535EEAF62A19A6757D82DD91349C41BAE2E3F208E268ABBA2A4378BC5C8D1ACF2FD260F"
-);
-pub const BOOT_0000_HASH: [u8; 48] = hex!(
-    "23ADA07F5261F12F34A0BD8E46760962D6B4D576A416F1FEA1C64BC656B1D28EACF7047AE6E967C58FD2A98BFA74C298"
 );
 
 /// BootOrder event bytes: 0001, 0002..=(1+num_disks), 0000 (u16 LE)
