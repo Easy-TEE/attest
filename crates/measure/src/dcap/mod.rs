@@ -126,7 +126,14 @@ pub fn expected_dcap_registers(
             let (mrtd, rtmr0) = match firmware {
                 Some(fw) => {
                     let acpi = platform.acpi.as_ref().ok_or(ReconstructError::MissingAcpi)?;
-                    let rtmr0 = self_hosted::build_rtmr0(fw, platform.ram_bytes, acpi)?.value();
+                    let rtmr0 = self_hosted::build_rtmr0(
+                        fw,
+                        platform.ram_bytes,
+                        acpi,
+                        platform.smbios_handoff.as_ref(),
+                        platform.dm_verity_boot,
+                    )?
+                    .value();
                     (Some(fw.mrtd), Some(rtmr0))
                 }
                 None => (None, None),
