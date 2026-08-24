@@ -6,11 +6,8 @@ use types::AcpiHashes;
 const CCEL_PATH: &str = "/sys/firmware/acpi/tables/data/CCEL";
 
 const EV_PLATFORM_CONFIG_FLAGS: u32 = 0x0000_000a;
+const EV_EFI_GPT_EVENT: u32 = 0x8000_0006;
 const EV_EFI_HANDOFF_TABLES: u32 = 0x8000_0009; // SMBIOS
-const RTMR0_PCR_INDEX: u32 = 1;
-
-const ACPI_DATA: &[u8] = b"ACPI DATA";
-const FW_CFG_BOOTORDER: &[u8] = b"QEMU FW CFG\0bootorder";
 
 const TPM_ALG_SHA1: u16 = 0x0004;
 const TPM_ALG_SHA256: u16 = 0x000b;
@@ -53,20 +50,15 @@ pub fn parse_ccel(raw: &[u8]) -> Result<CcelInfo, CcelError> {
 
     let mut acpi = Vec::with_capacity(3);
     let mut smbios_handoff = None;
-    let mut dm_verity_boot = true;
+    let mut dm_verity_boot = false;
     while cur.has_remaining() {
         let event = read_event(&mut cur)?;
-        if event.pcr_index != RTMR0_PCR_INDEX {
-            continue;
-        }
         match event.event_type {
-            EV_PLATFORM_CONFIG_FLAGS if event.data == ACPI_DATA => {
+            EV_PLATFORM_CONFIG_FLAGS if event.data == b"ACPI DATA" => {
                 acpi.push(event.sha384.ok_or(CcelError::MissingSha384)?);
             }
-            EV_PLATFORM_CONFIG_FLAGS if event.data.starts_with(FW_CFG_BOOTORDER) => {
-                dm_verity_boot = false;
-            }
             EV_EFI_HANDOFF_TABLES => smbios_handoff = event.sha384,
+            EV_EFI_GPT_EVENT => dm_verity_boot = true,
             _ => {}
         }
     }
@@ -81,14 +73,13 @@ pub fn parse_ccel(raw: &[u8]) -> Result<CcelInfo, CcelError> {
 }
 
 struct Event {
-    pcr_index: u32,
     event_type: u32,
     sha384: Option<[u8; 48]>,
     data: Vec<u8>,
 }
 
 fn read_event(c: &mut Cursor) -> Result<Event, CcelError> {
-    let pcr_index = c.read_u32()?;
+    c.read_u32()?; // rtmr index (unused)
     let event_type = c.read_u32()?;
     let count = c.read_u32()?;
     let mut sha384 = None;
@@ -101,7 +92,7 @@ fn read_event(c: &mut Cursor) -> Result<Event, CcelError> {
     }
     let event_size = c.read_u32()? as usize;
     let data = c.read_bytes(event_size)?.to_vec();
-    Ok(Event { pcr_index, event_type, sha384, data })
+    Ok(Event { event_type, sha384, data })
 }
 
 // Skips legacy SpecID event

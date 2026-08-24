@@ -13,8 +13,8 @@ use super::{
     secure_boot::{EFI_GLOBAL_VARIABLE_GUID, EFI_IMAGE_SECURITY_DATABASE_GUID, secure_boot_hash},
 };
 use crate::{
-    dcap::firmware::BOOT_0000_HASH,
-    event::{CALLING_EFI_APP, EXIT_BOOT_SERVICES, EXIT_BOOT_SERVICES_SUCCESS, Register, SEPARATOR},
+    dcap::{build_rtmr1, firmware::BOOT_0000_HASH},
+    event::{Register, SEPARATOR},
 };
 
 /// Boot path used by QEMU via fw_cfg when booting uki via -kernel
@@ -27,8 +27,8 @@ const OS_DISK_BOOT_HASH: [u8; 48] =
     hex!("1F880024A6BE9E726579B30322F55EDD042DA0FD83CB0A70F76652603DE5B6AB42EC327654382114BA7832778B4D71D6");
 
 /// Self-hosted RTMR1 and RTMR2 measurements
-pub fn measure(hashes: &DcapImageHashes) -> DcapRegisters {
-    DcapRegisters { rtmr1: build_rtmr1(hashes), rtmr2: build_rtmr2(hashes) }
+pub fn measure(hashes: &DcapImageHashes, disk_boot: bool) -> DcapRegisters {
+    DcapRegisters { rtmr1: build_rtmr1(hashes, disk_boot), rtmr2: build_rtmr2(hashes) }
 }
 
 /// RTMR0 rebuilt from firmware blob + platform metadata
@@ -61,9 +61,14 @@ pub fn build_rtmr0(
     mr.extend_raw(acpi.rsdp, "ACPI RSDP");
     mr.extend_raw(acpi.tables, "ACPI tables");
     let Some(smbios) = smbios_handoff else {
-        // Older OVMF versions have a single default boot entry
-        mr.extend(&[0, 0], "boot order");
-        mr.extend_raw(BOOT_0000_HASH, "boot 0000");
+        if dm_verity_boot {
+            mr.extend(&[0, 0, 1, 0], "BootOrder");
+            mr.extend_raw(BOOT_0000_HASH, "Boot0000");
+            mr.extend_raw(OS_DISK_BOOT_HASH, "Boot0001");
+        } else {
+            mr.extend(&[0, 0], "BootOrder");
+            mr.extend_raw(BOOT_0000_HASH, "Boot0000");
+        }
         return Ok(mr);
     };
     // Newer OVMF versions have an additional events
@@ -76,16 +81,4 @@ pub fn build_rtmr0(
         mr.extend_raw(OS_DISK_BOOT_HASH, "Boot0002");
     }
     Ok(mr)
-}
-
-/// RTMR1 for self-hosted TDX image
-pub fn build_rtmr1(hashes: &DcapImageHashes) -> Register<Sha384> {
-    let mut mr = Register::new();
-    mr.extend_raw(hashes.uki_authenticode, "UKI authenticode");
-    mr.extend(CALLING_EFI_APP, "calling EFI app");
-    mr.extend(SEPARATOR, "separator");
-    mr.extend_raw(hashes.kernel_authenticode, "kernel authenticode");
-    mr.extend(EXIT_BOOT_SERVICES, "exit boot services");
-    mr.extend(EXIT_BOOT_SERVICES_SUCCESS, "exit boot services success");
-    mr
 }

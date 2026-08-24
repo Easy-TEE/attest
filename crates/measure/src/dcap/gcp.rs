@@ -4,10 +4,17 @@ use hex_literal::hex;
 use sha2::Sha384;
 use types::AcpiHashes;
 
-use super::{DcapFirmware, DcapImageHashes, DcapRegisters, FirmwareError, build_rtmr2, secure_boot};
+use super::{
+    DcapFirmware,
+    DcapImageHashes,
+    DcapRegisters,
+    FirmwareError,
+    build_rtmr2,
+    secure_boot,
+};
 use crate::{
-    dcap::firmware::BOOT_0000_HASH,
-    event::{CALLING_EFI_APP, EXIT_BOOT_SERVICES, EXIT_BOOT_SERVICES_SUCCESS, Register, SEPARATOR},
+    dcap::{build_rtmr1, firmware::BOOT_0000_HASH},
+    event::{Register, SEPARATOR},
 };
 
 /// EFI Boot variable hashes
@@ -28,7 +35,7 @@ pub fn boot_order_bytes(num_disks: u32) -> Vec<u8> {
 
 /// GCP RTMR1 and RTMR2 measurements
 pub fn measure(hashes: &DcapImageHashes) -> DcapRegisters {
-    DcapRegisters { rtmr1: build_rtmr1(hashes), rtmr2: build_rtmr2(hashes) }
+    DcapRegisters { rtmr1: build_rtmr1(hashes, true), rtmr2: build_rtmr2(hashes) }
 }
 
 /// RTMR0: GCP-specific platform measurements (independent of image)
@@ -60,17 +67,4 @@ pub fn build_rtmr0(
     }
     mr.extend_raw(BOOT_0000_HASH, "boot 0000");
     Ok(mr)
-}
-
-/// RTMR1: GCP-specific image measurements (depends on image)
-pub fn build_rtmr1(hashes: &DcapImageHashes) -> Register<Sha384> {
-    let mut mr = Register::new();
-    mr.extend(CALLING_EFI_APP, "calling EFI app");
-    mr.extend(SEPARATOR, "separator");
-    mr.extend_raw(hashes.gpt_disk_guid_hash, "GPT disk GUID");
-    mr.extend_raw(hashes.uki_authenticode, "UKI authenticode");
-    mr.extend_raw(hashes.kernel_authenticode, "kernel authenticode");
-    mr.extend(EXIT_BOOT_SERVICES, "exit boot services");
-    mr.extend(EXIT_BOOT_SERVICES_SUCCESS, "exit boot services success");
-    mr
 }
