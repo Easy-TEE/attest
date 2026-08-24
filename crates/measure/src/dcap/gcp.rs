@@ -4,13 +4,17 @@ use hex_literal::hex;
 use sha2::Sha384;
 use types::AcpiHashes;
 
-use super::{DcapFirmware, DcapImageHashes, DcapRegisters, FirmwareError, build_rtmr2, secure_boot};
-use crate::event::{
-    CALLING_EFI_APP,
-    EXIT_BOOT_SERVICES,
-    EXIT_BOOT_SERVICES_SUCCESS,
-    Register,
-    SEPARATOR,
+use super::{
+    DcapFirmware,
+    DcapImageHashes,
+    DcapRegisters,
+    FirmwareError,
+    build_rtmr2,
+    secure_boot,
+};
+use crate::{
+    dcap::{build_rtmr1, firmware::BOOT_0000_HASH},
+    event::{Register, SEPARATOR},
 };
 
 /// EFI Boot variable hashes
@@ -19,9 +23,6 @@ pub const BOOT_0001_HASH: [u8; 48] = hex!(
 );
 pub const BOOT_0002_HASH: [u8; 48] = hex!(
     "9068065754FF3AE3DD58A5897535EEAF62A19A6757D82DD91349C41BAE2E3F208E268ABBA2A4378BC5C8D1ACF2FD260F"
-);
-pub const BOOT_0000_HASH: [u8; 48] = hex!(
-    "23ADA07F5261F12F34A0BD8E46760962D6B4D576A416F1FEA1C64BC656B1D28EACF7047AE6E967C58FD2A98BFA74C298"
 );
 
 /// BootOrder event bytes: 0001, 0002..=(1+num_disks), 0000 (u16 LE)
@@ -34,7 +35,7 @@ pub fn boot_order_bytes(num_disks: u32) -> Vec<u8> {
 
 /// GCP RTMR1 and RTMR2 measurements
 pub fn measure(hashes: &DcapImageHashes) -> DcapRegisters {
-    DcapRegisters { rtmr1: build_rtmr1(hashes), rtmr2: build_rtmr2(hashes) }
+    DcapRegisters { rtmr1: build_rtmr1(hashes, true), rtmr2: build_rtmr2(hashes) }
 }
 
 /// RTMR0: GCP-specific platform measurements (independent of image)
@@ -66,17 +67,4 @@ pub fn build_rtmr0(
     }
     mr.extend_raw(BOOT_0000_HASH, "boot 0000");
     Ok(mr)
-}
-
-/// RTMR1: GCP-specific image measurements (depends on image)
-pub fn build_rtmr1(hashes: &DcapImageHashes) -> Register<Sha384> {
-    let mut mr = Register::new();
-    mr.extend(CALLING_EFI_APP, "calling EFI app");
-    mr.extend(SEPARATOR, "separator");
-    mr.extend_raw(hashes.gpt_disk_guid_hash, "GPT disk GUID");
-    mr.extend_raw(hashes.uki_authenticode, "UKI authenticode");
-    mr.extend_raw(hashes.kernel_authenticode, "kernel authenticode");
-    mr.extend(EXIT_BOOT_SERVICES, "exit boot services");
-    mr.extend(EXIT_BOOT_SERVICES_SUCCESS, "exit boot services success");
-    mr
 }

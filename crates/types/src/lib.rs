@@ -56,12 +56,19 @@ pub struct AcpiHashes {
 }
 
 /// Additional platform information used to reconstruct registers
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub struct PlatformMetadata {
     pub attestation_type: AttestationType,
     pub ram_bytes: u64,
     pub num_disks: u32,
     pub acpi: Option<AcpiHashes>,
+    /// Only used on VMs booted with recent OVMF versions
+    #[serde(default)]
+    #[serde_as(as = "Option<Hex>")]
+    pub smbios_handoff: Option<[u8; 48]>,
+    #[serde(default)]
+    pub dm_verity_boot: bool,
 }
 
 /// Output of `prove` function

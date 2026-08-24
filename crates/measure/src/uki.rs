@@ -25,6 +25,7 @@ pub struct Uki {
     pub kernel_authenticode_sha256: [u8; 32],
     pub cmdline: Vec<u8>,
     pub stub_version: Option<u32>,
+    pub has_rootfs: bool,
     /// Only needed when the UKI is embedded in a disk image with a rootfs
     pub disk_guid_hash: Option<[u8; 48]>,
 }
@@ -53,14 +54,18 @@ impl Uki {
             // .raw disk image containing UKI
             let disk_guid_hash =
                 crate::dcap::gpt::disk_guid_hash_from_header(data).map_err(UkiError::Disk)?;
-            Self::parse_pe(&extract_uki(data)?, Some(disk_guid_hash))
+            Self::parse_pe(&extract_uki(data)?, Some(disk_guid_hash), true)
         } else {
             // Only UKI with no rootfs
-            Self::parse_pe(data, None)
+            Self::parse_pe(data, None, false)
         }
     }
 
-    fn parse_pe(data: &[u8], disk_guid_hash: Option<[u8; 48]>) -> Result<Self, UkiError> {
+    fn parse_pe(
+        data: &[u8],
+        disk_guid_hash: Option<[u8; 48]>,
+        has_rootfs: bool,
+    ) -> Result<Self, UkiError> {
         let pe = PeFile64::parse(data)?;
 
         let mut sections = Vec::new();
@@ -109,6 +114,7 @@ impl Uki {
             cmdline,
             disk_guid_hash,
             stub_version,
+            has_rootfs,
         })
     }
 
@@ -116,7 +122,7 @@ impl Uki {
         self.sections.iter().find(|s| s.name == name)
     }
 
-    /// Returns true if the systemd stub is recent enough to measure UKI sections
+    /// Returns true if systemd stub is recent enough to measure PE sections
     pub fn has_recent_stub(&self) -> bool {
         self.stub_version.is_some_and(|v| v >= 256)
     }
@@ -202,4 +208,3 @@ fn parse_stub_version(sdmagic: &[u8]) -> Option<u32> {
         text.split("systemd-stub ").nth(1)?.chars().take_while(char::is_ascii_digit).collect();
     digits.parse().ok()
 }
-

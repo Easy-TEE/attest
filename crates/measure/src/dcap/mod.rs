@@ -21,6 +21,7 @@ use super::{
     event::Register,
     uki::{Uki, to_utf16le_null_terminated},
 };
+use crate::event::{CALLING_EFI_APP, EXIT_BOOT_SERVICES, EXIT_BOOT_SERVICES_SUCCESS, SEPARATOR};
 
 /// Image-dependent DCAP register values
 #[derive(Debug, Serialize)]
@@ -54,6 +55,26 @@ pub fn measure(uki: &Uki) -> DcapImageHashes {
         gpt_disk_guid_hash: uki.disk_guid_hash.unwrap_or_else(|| gpt::disk_guid_hash(uki.size)),
         pe_sections: uki.has_recent_stub().then(|| pe_sections_hash(uki)),
     }
+}
+
+/// RTMR1 from portable image hashes
+/// disk_boot is only false for self-hosted VMs with no dm-verity/rootfs
+pub fn build_rtmr1(image: &DcapImageHashes, disk_boot: bool) -> Register<Sha384> {
+    let mut mr = Register::new();
+    if disk_boot {
+        mr.extend(CALLING_EFI_APP, "calling EFI app");
+        mr.extend(SEPARATOR, "separator");
+        mr.extend_raw(image.gpt_disk_guid_hash, "GPT disk GUID");
+        mr.extend_raw(image.uki_authenticode, "UKI authenticode");
+    } else {
+        mr.extend_raw(image.uki_authenticode, "UKI authenticode");
+        mr.extend(CALLING_EFI_APP, "calling EFI app");
+        mr.extend(SEPARATOR, "separator");
+    }
+    mr.extend_raw(image.kernel_authenticode, "kernel authenticode");
+    mr.extend(EXIT_BOOT_SERVICES, "exit boot services");
+    mr.extend(EXIT_BOOT_SERVICES_SUCCESS, "exit boot services success");
+    mr
 }
 
 /// RTMR2 from portable image hashes (identical on GCP and self-hosted)
@@ -113,7 +134,7 @@ pub fn expected_dcap_registers(
             let firmware = firmware.ok_or(ReconstructError::MissingFirmware)?;
             let rtmr0 =
                 gcp::build_rtmr0(firmware, platform.ram_bytes, acpi, platform.num_disks)?.value();
-            let rtmr1 = gcp::build_rtmr1(image).value();
+            let rtmr1 = build_rtmr1(image, true).value();
             Ok(ExpectedDcapRegisters {
                 mrtd: Some(firmware.mrtd),
                 rtmr0: Some(rtmr0),
@@ -122,11 +143,18 @@ pub fn expected_dcap_registers(
             })
         }
         AttestationType::SelfHostedTdx => {
-            let rtmr1 = self_hosted::build_rtmr1(image).value();
+            let rtmr1 = build_rtmr1(image, platform.dm_verity_boot).value();
             let (mrtd, rtmr0) = match firmware {
                 Some(fw) => {
                     let acpi = platform.acpi.as_ref().ok_or(ReconstructError::MissingAcpi)?;
-                    let rtmr0 = self_hosted::build_rtmr0(fw, platform.ram_bytes, acpi)?.value();
+                    let rtmr0 = self_hosted::build_rtmr0(
+                        fw,
+                        platform.ram_bytes,
+                        acpi,
+                        platform.smbios_handoff.as_ref(),
+                        platform.dm_verity_boot,
+                    )?
+                    .value();
                     (Some(fw.mrtd), Some(rtmr0))
                 }
                 None => (None, None),

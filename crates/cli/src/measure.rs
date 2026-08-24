@@ -56,8 +56,10 @@ pub(crate) fn run(target: Target) -> Result<()> {
             emit(measure::dcap::gcp::measure(&hashes), debug, MeasurementOutput::Dcap)?
         }
         Target::SelfHosted { uki, debug } => {
-            let hashes = measure::dcap::measure(&load_uki(&uki)?);
-            emit(measure::dcap::self_hosted::measure(&hashes), debug, MeasurementOutput::Dcap)?
+            let uki = load_uki(&uki)?;
+            let hashes = measure::dcap::measure(&uki);
+            let registers = measure::dcap::self_hosted::measure(&hashes, uki.has_rootfs);
+            emit(registers, debug, MeasurementOutput::Dcap)?
         }
     };
     println!("{}", to_string_pretty(&out)?);
