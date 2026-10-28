@@ -6,9 +6,12 @@ pub mod gcp;
 pub mod secure_boot;
 pub mod self_hosted;
 
+#[cfg(feature = "image")]
 pub(crate) mod gpt;
 mod tdvf;
-pub use firmware::{DcapFirmware, FirmwareError, GoogleError, HobTemplate};
+#[cfg(feature = "google-firmware")]
+pub use firmware::GoogleError;
+pub use firmware::{DcapFirmware, FirmwareError, HobTemplate};
 use serde::Serialize;
 use sha2::{Digest, Sha384};
 pub use tdvf::{TdvfError, mrtd_sha384};
@@ -16,11 +19,9 @@ use thiserror::Error;
 pub use types::DcapImageHashes;
 use types::{AttestationType, PlatformMetadata};
 
-use super::{
-    Measurement,
-    event::Register,
-    uki::{Uki, to_utf16le_null_terminated},
-};
+#[cfg(feature = "image")]
+use super::uki::{Uki, to_utf16le_null_terminated};
+use super::{Measurement, event::Register};
 use crate::event::{CALLING_EFI_APP, EXIT_BOOT_SERVICES, EXIT_BOOT_SERVICES_SUCCESS, SEPARATOR};
 
 /// Image-dependent DCAP register values
@@ -37,6 +38,7 @@ impl Measurement for DcapRegisters {
         types::DcapRegisters { rtmr1: self.rtmr1.value(), rtmr2: self.rtmr2.value() }
     }
 
+    #[cfg(feature = "image")]
     fn debug_json(&self) -> serde_json::Value {
         serde_json::json!({
             "rtmr1": self.rtmr1.debug_json(),
@@ -46,6 +48,7 @@ impl Measurement for DcapRegisters {
 }
 
 /// Produces portable image hashes from a UKI
+#[cfg(feature = "image")]
 pub fn measure(uki: &Uki) -> DcapImageHashes {
     DcapImageHashes {
         uki_authenticode: uki.authenticode_sha384,
@@ -85,6 +88,7 @@ pub fn build_rtmr2(hashes: &DcapImageHashes) -> Register<Sha384> {
     mr
 }
 
+#[cfg(feature = "image")]
 fn pe_sections_hash(uki: &Uki) -> [u8; 48] {
     let mut mr = Register::<Sha384>::new();
     for section in uki.sections.iter().filter(|s| s.measured) {

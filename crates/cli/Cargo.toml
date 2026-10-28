@@ -17,7 +17,7 @@ prove = ["dep:prove"]
 
 [dependencies]
 types = { workspace = true }
-measure = { workspace = true }
+measure = { workspace = true, features = ["image"] }
 verify = { workspace = true, optional = true }
 prove = { workspace = true, optional = true }
 pccs = { workspace = true, optional = true }

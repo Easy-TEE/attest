@@ -21,7 +21,7 @@ unused_async = "warn"
 
 [workspace.dependencies]
 types = { path = "crates/types", package = "attest-types" }
-measure = { path = "crates/measure", package = "attest-measure" }
+measure = { path = "crates/measure", package = "attest-measure", default-features = false }
 prove = { path = "crates/prove", package = "attest-prove" }
 verify = { path = "crates/verify", package = "attest-verify" }
 pccs = { path = "crates/pccs", package = "attest-pccs" }

@@ -13,3 +13,13 @@ Works out of the box with official Flashbots confidential images and with any im
 Supports Azure, GCP, and self-hosted deployments
 
 For a client/server library and standalone proxy built on top of `attest`, see [attested-tls](https://github.com/flashbots/attested-tls)
+
+## Measurement library features
+
+`attest-measure` has three features all of which are enabled by default:
+
+| Feature | Enables |
+| --- | --- |
+| `image` | UKI/PE, disk, archive, and GPT processing; image measurements and Azure PCR calculation; register event recording, event accessors, and debug JSON |
+| `platform` | Host metadata collection and CCEL parsing |
+| `google-firmware` | Downloading Google firmware and verifying its signed endorsements |

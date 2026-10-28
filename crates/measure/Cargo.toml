@@ -11,25 +11,28 @@ keywords = ["attestation", "CVM", "TDX"]
 types = { workspace = true }
 
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", optional = true }
 serde_with = { version = "3", features = ["hex"] }
 thiserror = "2"
 sha2 = "0.10"
-object = { version = "0.37", default-features = false, features = ["pe", "read"] }
-authenticode = { version = "0.5.0", features = ["object", "std"] }
+object = { version = "0.37", default-features = false, features = ["pe", "read"], optional = true }
+authenticode = { version = "0.5.0", features = ["object", "std"], optional = true }
 hex = "0.4"
 hex-literal = "1"
-crc32fast = "1"
-ureq = "3"
-rsa = "0.9"
-x509-parser = { version = "0.18", features = ["verify"] }
-prost = "0.14"
-fatfs = { version = "0.3.6", default-features = false, features = ["std", "alloc"] }
-flate2 = "1.1.9"
-tar = "0.4.46"
+crc32fast = { version = "1", optional = true }
+ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }
+rsa = { version = "0.9", optional = true }
+x509-parser = { version = "0.18", features = ["verify"], optional = true }
+prost = { version = "0.14", optional = true }
+fatfs = { version = "0.3.6", default-features = false, features = ["std", "alloc"], optional = true }
+flate2 = { version = "1.1.9", optional = true }
+tar = { version = "0.4.46", optional = true }
 
-[dev-dependencies]
-tempfile = "3"
+[features]
+default = ["image", "platform", "google-firmware"]
+image = ["dep:object", "dep:authenticode", "dep:fatfs", "dep:flate2", "dep:tar", "dep:crc32fast", "dep:serde_json", "ureq?/gzip"]
+platform = []
+google-firmware = ["dep:ureq", "dep:rsa", "dep:x509-parser", "dep:prost"]
 
 [lints]
 workspace = true
