@@ -105,7 +105,8 @@ impl<H: HashAlg> Register<H> {
         Self { value, ..Self::default() }
     }
 
-    /// Extend with a pre-computed hash, such as a UKI section digest.
+    /// Extend with a pre-computed hash (e.g. a
+    /// [`UkiSection`](super::uki::UkiSection) digest)
     pub fn extend_raw(&mut self, hash: H::Array, description: impl Into<String>) -> &mut Self {
         let mut h = H::default();
         h.update(self.value.as_ref());
