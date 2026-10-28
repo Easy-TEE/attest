@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use prost::Message;
 use rsa::{
@@ -28,10 +28,23 @@ impl DcapFirmware {
         mrtd: [u8; 48],
         root: Option<&X509Certificate>,
     ) -> Result<Self, GoogleError> {
+        let time =
+            SystemTime::now().duration_since(UNIX_EPOCH).expect("time before epoch").as_secs();
+        Self::from_google_at(mrtd, root, time)
+    }
+
+    /// Same as [`Self::from_google`] but checks the endorsement
+    /// certificate's validity at an explicit time to support verifying
+    /// older quotes
+    pub fn from_google_at(
+        mrtd: [u8; 48],
+        root: Option<&X509Certificate>,
+        time: u64,
+    ) -> Result<Self, GoogleError> {
         let bytes = http_get(&format!("{ENDORSEMENT_BUCKET}/tdx/{}.binarypb", hex::encode(mrtd)))?;
         let endorsement = Endorsement::decode(&*bytes)?;
         let golden = GoldenMeasurement::decode(&*endorsement.serialized_uefi_golden)?;
-        verify_endorsement(&endorsement, &golden, root)?;
+        verify_endorsement(&endorsement, &golden, root, time)?;
 
         let fw_raw = http_get(&format!("{ENDORSEMENT_BUCKET}/{}.fd", hex::encode(&golden.digest)))?;
         if Sha384::digest(&fw_raw)[..] != golden.digest[..] {
@@ -71,8 +84,8 @@ pub enum GoogleError {
     Endorsement(#[from] prost::DecodeError),
     #[error("endorsement certificate: {0}")]
     Cert(#[from] x509_parser::asn1_rs::Err<x509_parser::error::X509Error>),
-    #[error("endorsement certificate expired")]
-    CertExpired,
+    #[error("endorsement certificate not valid at {time} (valid {not_before} to {not_after})")]
+    CertNotValidAt { time: ASN1Time, not_before: ASN1Time, not_after: ASN1Time },
     #[error("certificate chain: {0}")]
     CertChain(#[from] x509_parser::error::X509Error),
     #[error("endorsement public key: {0}")]
@@ -95,15 +108,23 @@ fn http_get(url: &str) -> Result<Vec<u8>, GoogleError> {
         .map_err(|e| GoogleError::Http(e.to_string()))
 }
 
-// Checks that signature matches protobuf and is signed with Google root key
+// Checks that signature matches protobuf and is signed with Google root
+// key, by a certificate valid at `time`
 fn verify_endorsement(
     endorsement: &Endorsement,
     golden: &GoldenMeasurement,
     root: Option<&X509Certificate>,
+    time: u64,
 ) -> Result<(), GoogleError> {
     let leaf = X509Certificate::from_der(&golden.cert)?.1;
-    if !leaf.validity().is_valid() {
-        return Err(GoogleError::CertExpired);
+    let time = ASN1Time::from_timestamp(i64::try_from(time).map_err(|_| X509Error::InvalidDate)?)?;
+    let validity = leaf.validity();
+    if !validity.is_valid_at(time) {
+        return Err(GoogleError::CertNotValidAt {
+            time,
+            not_before: validity.not_before,
+            not_after: validity.not_after,
+        });
     }
     match root {
         Some(root) => leaf.verify_signature(Some(root.public_key())),

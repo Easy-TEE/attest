@@ -231,6 +231,23 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn gcp_endorsement_validity_at_time() {
+        // March 2026 firmware, signed by a certificate valid 2025-10-07 to
+        // 2030-10-07
+        let mrtd = hex!(
+            "8370d8f6d02f2d13e211e91c93fde923049522b241425a29a7bf0071ef49b250af4ef49d852fa3e10065d1b51dfce8fb"
+        );
+        // 2026-01-01
+        DcapFirmware::from_google_at(mrtd, None, 1_767_225_600).unwrap();
+        // 2025-01-01, before the certificate was issued
+        let err = DcapFirmware::from_google_at(mrtd, None, 1_735_689_600).unwrap_err();
+        assert!(matches!(err, GoogleError::CertNotValidAt { .. }), "{err:?}");
+        // 2031-01-01, after it expired
+        let err = DcapFirmware::from_google_at(mrtd, None, 1_924_992_000).unwrap_err();
+        assert!(matches!(err, GoogleError::CertNotValidAt { .. }), "{err:?}");
+    }
 }
 
 #[cfg(test)]
