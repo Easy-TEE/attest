@@ -1,11 +1,15 @@
 //! Register accumulator for PCR/RTMR measurement construction.
 //!
 //! [`Register<H>`] applies sequential extend operations (value = H(value ||
-//! hash)) and records each step as a [`RegisterEvent`] for debug inspection
+//! hash)) and, with the `image` feature, records each step for debug
+//! inspection
 
 use std::{fmt, marker::PhantomData};
 
-use serde::{Deserialize, Serialize};
+#[cfg(feature = "image")]
+use serde::Deserialize;
+use serde::Serialize;
+#[cfg(feature = "image")]
 use serde_with::{hex::Hex, serde_as};
 use sha2::{Digest, Sha256, Sha384};
 
@@ -41,6 +45,7 @@ impl HashAlg for Sha384 {
     }
 }
 
+#[cfg(feature = "image")]
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterEvent {
@@ -57,19 +62,30 @@ pub struct RegisterEvent {
 /// [`Register::<Sha384>::new()`] for TDX RTMRs
 pub struct Register<H: HashAlg> {
     value: H::Array,
+    #[cfg(feature = "image")]
     events: Vec<RegisterEvent>,
     _h: PhantomData<H>,
 }
 
 impl<H: HashAlg> Default for Register<H> {
     fn default() -> Self {
-        Self { value: H::zero(), events: Vec::new(), _h: PhantomData }
+        Self {
+            value: H::zero(),
+            #[cfg(feature = "image")]
+            events: Vec::new(),
+            _h: PhantomData,
+        }
     }
 }
 
 impl<H: HashAlg> Clone for Register<H> {
     fn clone(&self) -> Self {
-        Self { value: self.value, events: self.events.clone(), _h: PhantomData }
+        Self {
+            value: self.value,
+            #[cfg(feature = "image")]
+            events: self.events.clone(),
+            _h: PhantomData,
+        }
     }
 }
 
@@ -89,13 +105,15 @@ impl<H: HashAlg> Register<H> {
         Self { value, ..Self::default() }
     }
 
-    /// Extend with a pre-computed hash (e.g. a
-    /// [`UkiSection`](super::uki::UkiSection) digest)
+    /// Extend with a pre-computed hash, such as a UKI section digest.
     pub fn extend_raw(&mut self, hash: H::Array, description: impl Into<String>) -> &mut Self {
         let mut h = H::default();
         h.update(self.value.as_ref());
         h.update(hash.as_ref());
         self.value = H::into_array(h);
+        #[cfg(not(feature = "image"))]
+        let _ = description;
+        #[cfg(feature = "image")]
         self.events.push(RegisterEvent {
             digest: hash.as_ref().to_vec(),
             description: description.into(),
@@ -115,15 +133,18 @@ impl<H: HashAlg> Register<H> {
         self.value
     }
 
+    #[cfg(feature = "image")]
     pub fn events(&self) -> &[RegisterEvent] {
         &self.events
     }
 
+    #[cfg(feature = "image")]
     pub fn into_events(self) -> Vec<RegisterEvent> {
         self.events
     }
 
     /// Returns `{"value": "<hex>", "events": [...]}` for `--debug` output
+    #[cfg(feature = "image")]
     pub fn debug_json(&self) -> serde_json::Value {
         serde_json::json!({
             "value": hex::encode(self.value.as_ref()),
@@ -137,5 +158,41 @@ impl<H: HashAlg> Register<H> {
 impl<H: HashAlg> Serialize for Register<H> {
     fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
         hex::encode(self.value.as_ref()).serialize(ser)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(not(feature = "image"))]
+    #[test]
+    fn descriptions_are_not_converted_without_logging() {
+        struct Description;
+        impl From<Description> for String {
+            fn from(_: Description) -> Self {
+                panic!("description conversion must be skipped")
+            }
+        }
+        let mut register = Register::<Sha384>::new();
+        register.extend(b"event", Description);
+        assert_ne!(register.value(), [0; 48]);
+    }
+
+    #[cfg(feature = "image")]
+    #[test]
+    fn records_events_and_debug_output() {
+        let mut register = Register::<Sha384>::new();
+        register.extend_raw([7; 48], "example");
+        assert_eq!(register.events()[0].digest, [7; 48]);
+        assert_eq!(register.events()[0].description, "example");
+        assert_eq!(
+            register.debug_json(),
+            serde_json::json!({
+                "value": hex::encode(register.value()),
+                "events": [{"digest": hex::encode([7; 48]), "description": "example"}]
+            })
+        );
+        assert_eq!(register.clone().into_events().len(), 1);
     }
 }

@@ -9,13 +9,12 @@ keywords = ["attestation", "CVM", "TDX"]
 
 [dependencies]
 types = { workspace = true }
-measure = { workspace = true }
+measure = { workspace = true, features = ["google-firmware"] }
 pccs = { workspace = true }
 
 anyhow = "1"
 dcap-qvl = { workspace = true }
 hex = "0.4"
-hex-literal = "1"
 thiserror = "2"
 tracing = "0.1"
 

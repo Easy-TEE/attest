@@ -1,20 +1,14 @@
 //! Firmware-based DCAP register reconstruction inputs
 
-use std::time::Duration;
-
 use hex_literal::hex;
-use prost::Message;
-use rsa::{
-    RsaPublicKey,
-    pkcs8::DecodePublicKey,
-    pss::{Signature, VerifyingKey},
-    signature::Verifier,
-};
 use serde::{Deserialize, Serialize};
 use serde_with::hex::Hex;
-use sha2::{Digest, Sha256, Sha384};
+use sha2::{Digest, Sha384};
 use thiserror::Error;
-use x509_parser::prelude::*;
+#[cfg(feature = "google-firmware")]
+mod google;
+#[cfg(feature = "google-firmware")]
+pub use google::GoogleError;
 
 use super::tdvf::{self, SECTION_TYPE_TD_HOB, SECTION_TYPE_TEMP_MEM, TdvfError};
 
@@ -23,15 +17,9 @@ const LOW_MEM_TOP_GCP: u64 = 0xC000_0000;
 const HIGH_MEM_START: u64 = 0x1_0000_0000;
 const DEFAULT_TD_HOB_BASE: u64 = 0x80_9000;
 
-/// Bucket containing Google's signed endorsements and firmware blobs
-const ENDORSEMENT_BUCKET: &str = "https://storage.googleapis.com/gce_tcb_integrity/ovmf_x64_csm";
-/// Google root certificate for verifying endorsements
-const ROOT_CERT_URL: &str = "https://pki.goog/cloud_integrity/GCE-cc-tcb-root_1.crt";
-/// ureq has no read timeout by default
-const HTTP_TIMEOUT: Duration = Duration::from_secs(60);
-
-pub const BOOT_0000_HASH: [u8; 48] =
-    hex!("23ADA07F5261F12F34A0BD8E46760962D6B4D576A416F1FEA1C64BC656B1D28EACF7047AE6E967C58FD2A98BFA74C298");
+pub const BOOT_0000_HASH: [u8; 48] = hex!(
+    "23ADA07F5261F12F34A0BD8E46760962D6B4D576A416F1FEA1C64BC656B1D28EACF7047AE6E967C58FD2A98BFA74C298"
+);
 
 /// Firmware-based inputs needed to rebuild MRTD and RTMR0
 #[serde_with::apply([u8; 48] => #[serde_as(as = "Hex")])]
@@ -76,30 +64,6 @@ impl HobTemplate {
 }
 
 impl DcapFirmware {
-    /// Download and verify firmware for a GCP MRTD, then derive events
-    /// `root` overrides the endorsement root cert (fetched from pki.goog by
-    /// default)
-    pub fn from_google(
-        mrtd: [u8; 48],
-        root: Option<&X509Certificate>,
-    ) -> Result<Self, GoogleError> {
-        let bytes = http_get(&format!("{ENDORSEMENT_BUCKET}/tdx/{}.binarypb", hex::encode(mrtd)))?;
-        let endorsement = Endorsement::decode(&*bytes)?;
-        let golden = GoldenMeasurement::decode(&*endorsement.serialized_uefi_golden)?;
-        verify_endorsement(&endorsement, &golden, root)?;
-
-        let fw_raw = http_get(&format!("{ENDORSEMENT_BUCKET}/{}.fd", hex::encode(&golden.digest)))?;
-        if Sha384::digest(&fw_raw)[..] != golden.digest[..] {
-            return Err(GoogleError::Mismatch("firmware digest"));
-        }
-
-        let firmware = Self::from_blob(&fw_raw, true)?;
-        if firmware.mrtd != mrtd {
-            return Err(GoogleError::Mismatch("MRTD"));
-        }
-        Ok(firmware)
-    }
-
     /// Derive firmware events by parsing firmware blob
     pub fn from_blob(fw: &[u8], gcp: bool) -> Result<Self, FirmwareError> {
         let mrtd = tdvf::mrtd_sha384(fw)?;
@@ -131,7 +95,8 @@ fn build_hob_template_from_blob(fw: &[u8], gcp: bool) -> Result<HobTemplate, Fir
 
     let mut cursor = 0u64;
     if gcp {
-        // HOB order is [accepted, accepted, ..., unaccepted, unaccepted, ...]
+        // HOB order is [accepted, accepted, ..., unaccepted, unaccepted,
+        // ...]
         for &(start, end) in &accepted {
             push_memory_range(&mut hob, true, gcp, start, end - start);
         }
@@ -192,80 +157,7 @@ fn push_memory_range(hob: &mut Vec<u8>, accepted: bool, gcp: bool, start: u64, l
     hob.extend_from_slice(&length.to_le_bytes());
 }
 
-#[derive(Message)]
-struct Endorsement {
-    // Raw bytes are needed verify signature
-    #[prost(bytes = "vec", tag = "1")]
-    serialized_uefi_golden: Vec<u8>,
-    #[prost(bytes = "vec", tag = "2")]
-    signature: Vec<u8>,
-}
-
-#[derive(Message)]
-struct GoldenMeasurement {
-    #[prost(bytes = "vec", tag = "4")]
-    cert: Vec<u8>,
-    #[prost(bytes = "vec", tag = "5")]
-    digest: Vec<u8>,
-}
-
-#[derive(Error, Debug)]
-pub enum GoogleError {
-    #[error("HTTP: {0}")]
-    Http(String),
-    #[error("malformed launch endorsement: {0}")]
-    Endorsement(#[from] prost::DecodeError),
-    #[error("endorsement certificate: {0}")]
-    Cert(#[from] x509_parser::asn1_rs::Err<x509_parser::error::X509Error>),
-    #[error("endorsement certificate expired")]
-    CertExpired,
-    #[error("certificate chain: {0}")]
-    CertChain(#[from] x509_parser::error::X509Error),
-    #[error("endorsement public key: {0}")]
-    Key(#[from] rsa::pkcs8::spki::Error),
-    #[error("endorsement signature: {0}")]
-    Signature(#[from] rsa::signature::Error),
-    #[error("{0} does not match endorsement")]
-    Mismatch(&'static str),
-    #[error("firmware: {0}")]
-    Firmware(#[from] FirmwareError),
-}
-
-fn http_get(url: &str) -> Result<Vec<u8>, GoogleError> {
-    ureq::get(url)
-        .config()
-        .timeout_global(Some(HTTP_TIMEOUT))
-        .build()
-        .call()
-        .and_then(|mut r| r.body_mut().read_to_vec())
-        .map_err(|e| GoogleError::Http(e.to_string()))
-}
-
-// Checks that signature matches protobuf and is signed with Google root key
-fn verify_endorsement(
-    endorsement: &Endorsement,
-    golden: &GoldenMeasurement,
-    root: Option<&X509Certificate>,
-) -> Result<(), GoogleError> {
-    let leaf = X509Certificate::from_der(&golden.cert)?.1;
-    if !leaf.validity().is_valid() {
-        return Err(GoogleError::CertExpired);
-    }
-    match root {
-        Some(root) => leaf.verify_signature(Some(root.public_key())),
-        None => {
-            let raw_cert = http_get(ROOT_CERT_URL)?;
-            let root = X509Certificate::from_der(&raw_cert)?.1;
-            leaf.verify_signature(Some(root.public_key()))
-        }
-    }?;
-
-    let key = RsaPublicKey::from_public_key_der(leaf.public_key().raw)?;
-    let sig = Signature::try_from(&*endorsement.signature)?;
-    Ok(VerifyingKey::<Sha256>::new(key).verify(&endorsement.serialized_uefi_golden, &sig)?)
-}
-
-#[cfg(test)]
+#[cfg(all(test, feature = "google-firmware"))]
 mod tests {
     use hex_literal::hex;
 
@@ -275,10 +167,30 @@ mod tests {
 
     /// (RAM GiB, expected HOB digest) for recent GCP firmware
     const EXPECTED_HOB: [(u64, [u8; 48]); 4] = [
-        (16, hex!("458994daa60deac8dea19dba79748f6ff93fd0aebb8e3e0be5a65eb12309d342c3ce31cc67af7bbd22af1a44e7d9fe21")),
-        (32, hex!("aa9e81feeb58a9eb3a9f4110cc7b5696240437ea4c1a9c30518cfc44fa305183e6473e6bc02ddc4de09d0c49c49fadb5")),
-        (88, hex!("a5be8ecd74020972e328fbbe94d2886817ef0d2e8a4e94e9572e8e1b221f3f608cddc868cf8b08e8e645e4aaeba68279")),
-        (176, hex!("21092eadb73948aebb405b826354c23c3025635c89a8d91f85905afb120b7d98025a6c3083e8e82b5320695b253ce341")),
+        (
+            16,
+            hex!(
+                "458994daa60deac8dea19dba79748f6ff93fd0aebb8e3e0be5a65eb12309d342c3ce31cc67af7bbd22af1a44e7d9fe21"
+            ),
+        ),
+        (
+            32,
+            hex!(
+                "aa9e81feeb58a9eb3a9f4110cc7b5696240437ea4c1a9c30518cfc44fa305183e6473e6bc02ddc4de09d0c49c49fadb5"
+            ),
+        ),
+        (
+            88,
+            hex!(
+                "a5be8ecd74020972e328fbbe94d2886817ef0d2e8a4e94e9572e8e1b221f3f608cddc868cf8b08e8e645e4aaeba68279"
+            ),
+        ),
+        (
+            176,
+            hex!(
+                "21092eadb73948aebb405b826354c23c3025635c89a8d91f85905afb120b7d98025a6c3083e8e82b5320695b253ce341"
+            ),
+        ),
     ];
 
     #[test]
@@ -287,15 +199,23 @@ mod tests {
         let releases = [
             (
                 // MRTD from March 2026 firmware
-                hex!("8370d8f6d02f2d13e211e91c93fde923049522b241425a29a7bf0071ef49b250af4ef49d852fa3e10065d1b51dfce8fb"),
+                hex!(
+                    "8370d8f6d02f2d13e211e91c93fde923049522b241425a29a7bf0071ef49b250af4ef49d852fa3e10065d1b51dfce8fb"
+                ),
                 // CFV from March 2026 firmware
-                hex!("16a03d3d47d197945e85080880f6af2d87355f3d1eae2e27295d286e2ce7da3df4128d5d20a31d4c2cb3b20e91aecbca"),
+                hex!(
+                    "16a03d3d47d197945e85080880f6af2d87355f3d1eae2e27295d286e2ce7da3df4128d5d20a31d4c2cb3b20e91aecbca"
+                ),
             ),
             (
                 // MRTD from April 2026 firmware
-                hex!("feb7486608382c1ff0e15b4648ddc0acea6ca974eb53e3529f4c4bd5ffbaa20bf335cb75965cea65fe473aed9647c162"),
+                hex!(
+                    "feb7486608382c1ff0e15b4648ddc0acea6ca974eb53e3529f4c4bd5ffbaa20bf335cb75965cea65fe473aed9647c162"
+                ),
                 // CFV from April 2026 firmware
-                hex!("9cb6bf09aea7b4acb8549e328d0edd6f15defc0b00d744bb9fb5bab0962bc5c70f69d233e96dbc7c1105ba085781dc88"),
+                hex!(
+                    "9cb6bf09aea7b4acb8549e328d0edd6f15defc0b00d744bb9fb5bab0962bc5c70f69d233e96dbc7c1105ba085781dc88"
+                ),
             ),
         ];
         for (mrtd, cfv) in releases {
@@ -310,5 +230,35 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod local_tests {
+    use super::*;
+
+    #[test]
+    fn parses_local_firmware_without_network() {
+        // One CFV section and a firmware footer pointing to its TDVF
+        // descriptor.
+        let mut blob = vec![0; 512];
+        blob[76..80].copy_from_slice(&1u32.to_le_bytes());
+        blob[84..88].copy_from_slice(&16u32.to_le_bytes());
+        blob[104..108].copy_from_slice(&1u32.to_le_bytes());
+        blob[440..444].copy_from_slice(&448u32.to_le_bytes());
+        blob[444..446].copy_from_slice(&22u16.to_le_bytes());
+        blob[446..462].copy_from_slice(&hex!("35657ae44a989847865e4685a7bf8ec2"));
+        blob[462..464].copy_from_slice(&40u16.to_le_bytes());
+        for gcp in [false, true] {
+            let firmware = DcapFirmware::from_blob(&blob, gcp).unwrap();
+            assert_eq!(firmware.mrtd, <[u8; 48]>::from(Sha384::digest([])));
+            assert_eq!(firmware.cfv, <[u8; 48]>::from(Sha384::digest([0; 16])));
+            assert!(firmware.hob.digest(4 << 30).is_ok());
+        }
+    }
+
+    #[test]
+    fn malformed_local_firmware_returns_parse_error() {
+        assert!(matches!(DcapFirmware::from_blob(&[], false), Err(FirmwareError::Tdvf(_))));
     }
 }
