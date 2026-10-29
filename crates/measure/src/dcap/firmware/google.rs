@@ -15,15 +15,16 @@ use super::{DcapFirmware, FirmwareError};
 
 /// Bucket containing Google's signed endorsements and firmware blobs
 const ENDORSEMENT_BUCKET: &str = "https://storage.googleapis.com/gce_tcb_integrity/ovmf_x64_csm";
-/// Google root certificate for verifying endorsements
-const ROOT_CERT_URL: &str = "https://pki.goog/cloud_integrity/GCE-cc-tcb-root_1.crt";
+/// Pinned Google root certificate for verifying endorsements (DER).
+/// Source: https://pki.goog/cloud_integrity/GCE-cc-tcb-root_1.crt
+/// SHA-256: e876bc6978bf4f3da445f98a0a82363c8c0bae5a1fc033c6df65846a6cb0f18c
+const ROOT_CERT: &[u8] = include_bytes!("assets/GCE-cc-tcb-root_1.crt");
 /// ureq has no read timeout by default
 const HTTP_TIMEOUT: Duration = Duration::from_secs(60);
 
 impl DcapFirmware {
     /// Download and verify firmware for a GCP MRTD, then derive events
-    /// `root` overrides the endorsement root cert (fetched from pki.goog by
-    /// default)
+    /// `root` overrides the pinned endorsement root certificate.
     pub fn from_google(
         mrtd: [u8; 48],
         root: Option<&X509Certificate>,
@@ -108,8 +109,7 @@ fn verify_endorsement(
     match root {
         Some(root) => leaf.verify_signature(Some(root.public_key())),
         None => {
-            let raw_cert = http_get(ROOT_CERT_URL)?;
-            let root = X509Certificate::from_der(&raw_cert)?.1;
+            let root = X509Certificate::from_der(ROOT_CERT)?.1;
             leaf.verify_signature(Some(root.public_key()))
         }
     }?;
