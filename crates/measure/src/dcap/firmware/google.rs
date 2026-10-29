@@ -20,6 +20,9 @@ const ROOT_CERT_URL: &str = "https://pki.goog/cloud_integrity/GCE-cc-tcb-root_1.
 /// ureq has no read timeout by default
 const HTTP_TIMEOUT: Duration = Duration::from_secs(60);
 
+#[cfg(test)]
+mod rtmr0_poc;
+
 impl DcapFirmware {
     /// Download and verify firmware for a GCP MRTD, then derive events
     /// `root` overrides the endorsement root cert (fetched from pki.goog by
