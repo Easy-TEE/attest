@@ -13,6 +13,8 @@ pub enum PlatformError {
     Ccel(#[from] CcelError),
     #[error("Detected {detected_disks} disks is less than the {extra_disks} platform disks")]
     TooFewDisks { detected_disks: u32, extra_disks: u32 },
+    #[error("No SMBIOS memory device (type 17) entries found")]
+    NoMemoryDevices,
 }
 
 /// Identify the host platform and read system specs
@@ -40,7 +42,16 @@ pub fn metadata_for(attestation_type: AttestationType) -> Result<PlatformMetadat
         .checked_sub(extra_disks)
         .ok_or(PlatformError::TooFewDisks { detected_disks, extra_disks })?;
 
-    let ram_bytes = ram_bytes()?;
+    let ram_bytes = match attestation_type {
+        // Azure verification checks vTPM PCRs as recorded rather than
+        // predicting a register from platform metadata, so it never uses
+        // this, and nothing ties it to the quote. Furthermore reading it requires
+        // dmi-sysfs, which amd64 Azure kernels don't build
+        // (https://bugs.launchpad.net/ubuntu/+source/linux-azure/+bug/2172766)
+        AttestationType::AzureTdx => 0,
+        // Feeds the TD HOB digest in RTMR0, so must be the exact SMBIOS figure
+        _ => ram_bytes()?,
+    };
     Ok(PlatformMetadata {
         attestation_type,
         ram_bytes,
@@ -91,6 +102,10 @@ fn ram_bytes() -> Result<u64, PlatformError> {
             s => s as u64,
         };
         total += mb * MIB;
+    }
+    // A zero total would only surface later as an RTMR0 mismatch
+    if total == 0 {
+        return Err(PlatformError::NoMemoryDevices);
     }
     Ok(total)
 }
