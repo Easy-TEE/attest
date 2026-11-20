@@ -148,6 +148,21 @@ pub fn to_utf16le_null_terminated(input: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Encode the embedded command line as passed to Linux by systemd-stub.
+/// Match `mangle_stub_cmdline`: stop at NUL, replace ASCII control
+/// characters and DEL with spaces, and trim surrounding spaces without
+/// collapsing internal whitespace. Raw PE section measurements must use
+/// the original bytes instead.
+pub(crate) fn normalized_cmdline_utf16le(input: &[u8]) -> Vec<u8> {
+    let normalized: Vec<u8> = input
+        .iter()
+        .copied()
+        .take_while(|&b| b != 0)
+        .map(|b| if b <= b' ' || b == 0x7f { b' ' } else { b })
+        .collect();
+    to_utf16le_null_terminated(normalized.trim_ascii())
+}
+
 fn pe_authenticode_sha384(data: &[u8]) -> Result<[u8; 48], UkiError> {
     let pe = PeFile64::parse(data)?;
     let mut h = Sha384::new();
@@ -207,4 +222,30 @@ fn parse_stub_version(sdmagic: &[u8]) -> Option<u32> {
     let digits: String =
         text.split("systemd-stub ").nth(1)?.chars().take_while(char::is_ascii_digit).collect();
     digits.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_linux_command_line() {
+        for (input, expected) in [
+            (b"quiet".as_slice(), "quiet"),
+            (b"quiet\0", "quiet"),
+            (b" \tquiet\r\n", "quiet"),
+            (b"quiet\0ignored\0", "quiet"),
+            (b"\0ignored", ""),
+            (b"", ""),
+            (b" \t\r\n\x7f", ""),
+            (b"a\tb\nc\x01d\x7fe", "a b c d e"),
+            (b"a  \t b", "a    b"),
+            (b"key=\"a\tb\"", "key=\"a b\""),
+            ("\u{a0}caf\u{e9}\u{a0}".as_bytes(), "\u{a0}caf\u{e9}\u{a0}"),
+        ] {
+            let expected: Vec<u8> =
+                expected.encode_utf16().chain([0]).flat_map(u16::to_le_bytes).collect();
+            assert_eq!(normalized_cmdline_utf16le(input), expected, "input: {input:?}");
+        }
+    }
 }
