@@ -45,19 +45,19 @@ pub(crate) fn run(target: Target) -> Result<()> {
             let uki = load_uki(&uki)?;
             to_value(MeasurementOutput::Portable(Box::new(PortableMeasurements {
                 azure: (!no_azure).then(|| measure::azure::measure(&uki).finalize()),
-                dcap: measure::dcap::measure(&uki),
+                dcap: measure::dcap::measure(&uki)?,
             })))?
         }
         Target::Azure { uki, debug } => {
             emit(measure::azure::measure(&load_uki(&uki)?), debug, MeasurementOutput::Azure)?
         }
         Target::Gcp { uki, debug } => {
-            let hashes = measure::dcap::measure(&load_uki(&uki)?);
+            let hashes = measure::dcap::measure(&load_uki(&uki)?)?;
             emit(measure::dcap::gcp::measure(&hashes), debug, MeasurementOutput::Dcap)?
         }
         Target::SelfHosted { uki, debug } => {
             let uki = load_uki(&uki)?;
-            let hashes = measure::dcap::measure(&uki);
+            let hashes = measure::dcap::measure(&uki)?;
             let registers = measure::dcap::self_hosted::measure(&hashes, uki.has_rootfs);
             emit(registers, debug, MeasurementOutput::Dcap)?
         }
