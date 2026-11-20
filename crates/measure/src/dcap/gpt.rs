@@ -50,30 +50,77 @@ pub(super) fn disk_guid_hash(uki_size: u64) -> [u8; 48] {
     Sha384::digest(&blob).into()
 }
 
-/// Calculate UEFI GPT event hash from rootfs disk image GPT header
-pub(crate) fn disk_guid_hash_from_header(raw: &[u8]) -> Result<[u8; 48], &'static str> {
-    const SECTOR: usize = 512;
-    let header = raw.get(SECTOR..SECTOR + 92).ok_or("GPT header out of bounds")?;
-    let num_entries = u32::from_le_bytes(header[80..84].try_into().unwrap()) as usize;
-    let entry_size = u32::from_le_bytes(header[84..88].try_into().unwrap()) as usize;
-    if entry_size < 16 {
-        return Err("GPT partition entry size too small");
-    }
-    let array_len = num_entries.checked_mul(entry_size).ok_or("GPT partition array overflow")?;
-    let array =
-        raw.get(2 * SECTOR..2 * SECTOR + array_len).ok_or("GPT partition array out of bounds")?;
+/// Primary GPT of a disk image with 512-byte logical sectors.
+pub(crate) struct Gpt<'a> {
+    disk: &'a [u8],
+    header: &'a [u8],
+    entries: &'a [u8],
+    entry_size: usize,
+}
 
-    // Skip partitions with type GUID 000...
-    let used: Vec<&[u8]> =
-        array.chunks_exact(entry_size).filter(|e| e[..16].iter().any(|&b| b != 0)).collect();
-
-    let mut blob = Vec::with_capacity(92 + 8 + used.len() * entry_size);
-    blob.extend_from_slice(header);
-    blob.extend_from_slice(&(used.len() as u64).to_le_bytes());
-    for e in &used {
-        blob.extend_from_slice(e);
+impl<'a> Gpt<'a> {
+    pub(crate) fn parse(disk: &'a [u8]) -> Result<Self, &'static str> {
+        let header = disk.get(512..512 + 92).ok_or("GPT header out of bounds")?;
+        if &header[..8] != b"EFI PART" {
+            return Err("invalid GPT signature");
+        }
+        let num_entries = u32::from_le_bytes(header[80..84].try_into().unwrap()) as usize;
+        let entry_size = u32::from_le_bytes(header[84..88].try_into().unwrap()) as usize;
+        if entry_size < 128 {
+            return Err("GPT partition entry size too small");
+        }
+        let array_start = lba_offset(u64::from_le_bytes(header[72..80].try_into().unwrap()))?;
+        let array_len =
+            num_entries.checked_mul(entry_size).ok_or("GPT partition array overflow")?;
+        let array_end = array_start.checked_add(array_len).ok_or("GPT partition array overflow")?;
+        let entries =
+            disk.get(array_start..array_end).ok_or("GPT partition array out of bounds")?;
+        Ok(Self { disk, header, entries, entry_size })
     }
-    Ok(Sha384::digest(&blob).into())
+
+    fn used_partitions(&self) -> impl Iterator<Item = &[u8]> {
+        // Unused entries have an all-zero partition type GUID.
+        self.entries
+            .chunks_exact(self.entry_size)
+            .filter(|entry| entry[..16].iter().any(|&b| b != 0))
+    }
+
+    /// UEFI_GPT_DATA: header, used partition count, and used entries in
+    /// their original order, including the full declared entry size.
+    pub(crate) fn disk_guid_hash(&self) -> [u8; 48] {
+        let mut hash = Sha384::new();
+        hash.update(self.header);
+        hash.update((self.used_partitions().count() as u64).to_le_bytes());
+        for entry in self.used_partitions() {
+            hash.update(entry);
+        }
+        hash.finalize().into()
+    }
+
+    /// Find the ESP by type GUID. Multiple ESPs are ambiguous because the
+    /// image alone does not identify which one the firmware will boot.
+    pub(crate) fn esp(&self) -> Result<&'a [u8], &'static str> {
+        let esp_type = encode_guid(EFI_SYSTEM_PARTITION_GUID);
+        let mut esps = self.used_partitions().filter(|entry| entry[..16] == esp_type);
+        let entry = esps.next().ok_or("GPT has no EFI system partition")?;
+        if esps.next().is_some() {
+            return Err("GPT has multiple EFI system partitions");
+        }
+        let first = u64::from_le_bytes(entry[32..40].try_into().unwrap());
+        let last = u64::from_le_bytes(entry[40..48].try_into().unwrap());
+        if last < first {
+            return Err("invalid ESP LBA range");
+        }
+        let start = lba_offset(first)?;
+        let end = lba_offset(last.checked_add(1).ok_or("ESP LBA range overflow")?)?;
+        self.disk.get(start..end).ok_or("ESP out of bounds")
+    }
+}
+
+fn lba_offset(lba: u64) -> Result<usize, &'static str> {
+    lba.checked_mul(512)
+        .and_then(|offset| usize::try_from(offset).ok())
+        .ok_or("GPT LBA offset overflow")
 }
 
 /// 92-byte GPT primary header with empty HeaderCRC32
