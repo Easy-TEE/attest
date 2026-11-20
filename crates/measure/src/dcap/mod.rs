@@ -20,7 +20,7 @@ pub use types::DcapImageHashes;
 use types::{AttestationType, PlatformMetadata};
 
 #[cfg(feature = "image")]
-use super::uki::{Uki, to_utf16le_null_terminated};
+use super::uki::{Uki, normalized_cmdline_utf16le};
 use super::{Measurement, event::Register};
 use crate::event::{CALLING_EFI_APP, EXIT_BOOT_SERVICES, EXIT_BOOT_SERVICES_SUCCESS, SEPARATOR};
 
@@ -53,7 +53,7 @@ pub fn measure(uki: &Uki) -> DcapImageHashes {
     DcapImageHashes {
         uki_authenticode: uki.authenticode_sha384,
         kernel_authenticode: uki.kernel_authenticode_sha384,
-        cmdline_hash: sha384(&to_utf16le_null_terminated(&uki.cmdline)),
+        cmdline_hash: sha384(&normalized_cmdline_utf16le(&uki.cmdline)),
         initrd_hash: uki.section(".initrd").expect("UKI missing .initrd section").digest_sha384,
         gpt_disk_guid_hash: uki.disk_guid_hash.unwrap_or_else(|| gpt::disk_guid_hash(uki.size)),
         pe_sections: uki.has_recent_stub().then(|| pe_sections_hash(uki)),
