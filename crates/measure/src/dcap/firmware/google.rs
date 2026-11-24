@@ -2,12 +2,13 @@ use std::time::Duration;
 
 use prost::Message;
 use rsa::{
-    RsaPublicKey,
+    PublicKey,
     pkcs8::DecodePublicKey,
     pss::{Signature, VerifyingKey},
+    sha2::Sha256,
     signature::Verifier,
 };
-use sha2::{Digest, Sha256, Sha384};
+use sha2::{Digest, Sha384};
 use thiserror::Error;
 use x509_parser::prelude::*;
 
@@ -114,7 +115,7 @@ fn verify_endorsement(
         }
     }?;
 
-    let key = RsaPublicKey::from_public_key_der(leaf.public_key().raw)?;
+    let key = PublicKey::from_public_key_der(leaf.public_key().raw)?;
     let sig = Signature::try_from(&*endorsement.signature)?;
     Ok(VerifyingKey::<Sha256>::new(key).verify(&endorsement.serialized_uefi_golden, &sig)?)
 }
