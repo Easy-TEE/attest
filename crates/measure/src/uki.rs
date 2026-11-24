@@ -148,11 +148,7 @@ pub fn to_utf16le_null_terminated(input: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Encode the embedded command line as passed to Linux by systemd-stub.
-/// Match `mangle_stub_cmdline`: stop at NUL, replace ASCII control
-/// characters and DEL with spaces, and trim surrounding spaces without
-/// collapsing internal whitespace. Raw PE section measurements must use
-/// the original bytes instead.
+// Match systemd-stub's mangle_stub_cmdline whitespace rules
 pub(crate) fn normalized_cmdline_utf16le(input: &[u8]) -> Vec<u8> {
     let normalized: Vec<u8> = input
         .iter()
