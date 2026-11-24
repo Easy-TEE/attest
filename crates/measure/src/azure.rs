@@ -6,7 +6,7 @@ use sha2::Sha256;
 use super::{
     Measurement,
     event::{CALLING_EFI_APP, Register, SEPARATOR},
-    uki::{Uki, to_utf16le_null_terminated},
+    uki::{Uki, normalized_cmdline_utf16le},
 };
 
 #[derive(Debug, Serialize)]
@@ -53,7 +53,7 @@ fn measure_pcr4(uki: &Uki) -> Register<Sha256> {
 /// PCR9: cmdline (UTF-16LE) + initrd
 fn measure_pcr9(uki: &Uki) -> Register<Sha256> {
     let mut pcr = Register::new();
-    pcr.extend(&to_utf16le_null_terminated(&uki.cmdline), "cmdline (UTF-16LE)");
+    pcr.extend(&normalized_cmdline_utf16le(&uki.cmdline), "cmdline (UTF-16LE)");
     if let Some(initrd) = uki.section(".initrd") {
         pcr.extend_raw(initrd.digest_sha256, "initrd");
     }
