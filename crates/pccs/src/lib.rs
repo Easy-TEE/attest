@@ -9,7 +9,13 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use dcap_qvl::{QuoteCollateralV3, collateral::get_collateral_for_fmspc, tcb_info::TcbInfo};
+use dcap_qvl::{
+    QuoteCollateralV3,
+    collateral::CollateralClient,
+    configs::DefaultConfig,
+    http::{HttpClient, HttpResponse},
+    tcb_info::TcbInfo,
+};
 use thiserror::Error;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::{
@@ -379,7 +385,7 @@ impl Pccs {
     /// Fetches available FMSPC entries from configured PCCS/PCS endpoint
     async fn fetch_fmspcs(&self) -> Result<Vec<FmspcEntry>, PccsError> {
         let url = format!("{}/sgx/certification/v4/fmspcs", self.url);
-        let client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build()?;
+        let client = pccs_http_client(Duration::from_secs(15))?;
         let response = client.get(&url).send().await?;
         if !response.status().is_success() {
             return Err(PccsError::FmspcFetch(response.status()));
@@ -425,11 +431,41 @@ async fn fetch_collateral(
     fmspc: String,
     ca: &'static str,
 ) -> Result<QuoteCollateralV3, PccsError> {
-    get_collateral_for_fmspc(
-        url, fmspc, ca, false, // Indicates not SGX
+    let http = PccsHttp(pccs_http_client(Duration::from_secs(180))?);
+    CollateralClient::<DefaultConfig, _>::new(http, url)
+        .fetch_for_fmspc_without_pck_chain(&fmspc, ca, false)
+        .await
+        .map_err(Into::into)
+}
+
+fn pccs_http_client(timeout: Duration) -> Result<reqwest::Client, PccsError> {
+    // Reqwest's default Rustls client uses the platform trust store.
+    let roots = webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect::<rustls::RootCertStore>();
+    let mut tls = rustls::ClientConfig::builder_with_provider(
+        rustls::crypto::ring::default_provider().into(),
     )
-    .await
-    .map_err(Into::into)
+    .with_safe_default_protocol_versions()
+    .map_err(anyhow::Error::from)?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    tls.alpn_protocols = vec![b"http/1.1".to_vec()];
+    Ok(reqwest::Client::builder().tls_backend_preconfigured(tls).timeout(timeout).build()?)
+}
+
+struct PccsHttp(reqwest::Client);
+
+impl HttpClient for PccsHttp {
+    async fn get(&self, url: &str) -> anyhow::Result<HttpResponse> {
+        let response = self.0.get(url).send().await?;
+        let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .map(|(name, value)| Ok((name.to_string(), value.to_str()?.to_owned())))
+            .collect::<Result<_, reqwest::header::ToStrError>>()?;
+        let body = response.bytes().await?.to_vec();
+        Ok(HttpResponse { status, headers, body })
+    }
 }
 
 /// Extracts the earliest next update timestamp from collateral metadata

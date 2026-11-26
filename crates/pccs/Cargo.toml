@@ -15,9 +15,9 @@ thiserror = "2.0.17"
 serde = "1.0.228"
 serde_json = "1.0.145"
 anyhow = "1.0.100"
-reqwest = { version = "0.12.23", default-features = false, features = [
-  "rustls-tls-webpki-roots-no-provider",
-] }
+reqwest = { version = "0.13.2", default-features = false, features = ["rustls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "tls12"] }
+webpki-roots = "1"
 x509-parser = "0.18.0"
 
 [dev-dependencies]

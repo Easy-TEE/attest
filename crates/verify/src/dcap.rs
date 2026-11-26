@@ -2,7 +2,10 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use dcap_qvl::quote::{Quote, Report};
+use dcap_qvl::{
+    intel::{quote_ca, quote_fmspc},
+    quote::Quote,
+};
 use pccs::{Pccs, PccsError};
 use thiserror::Error;
 
@@ -30,16 +33,11 @@ pub fn validate_quote_at(
     time: u64,
 ) -> Result<ValidatedDcapQuote, DcapError> {
     let parsed = Quote::parse(quote)?;
-    let ca = parsed.ca()?;
-    let fmspc = hex::encode_upper(parsed.fmspc()?);
+    let ca = quote_ca(&parsed)?.as_id_str();
+    let fmspc = hex::encode_upper(quote_fmspc(&parsed)?);
     let collateral = pccs.get_collateral_sync(fmspc, ca, time)?;
-    dcap_qvl::verify::verify(quote, &collateral, time)?;
-
-    let report = match parsed.report {
-        Report::TD10(r) => r,
-        Report::TD15(r) => r.base,
-        Report::SgxEnclave(_) => return Err(DcapError::SgxNotSupported),
-    };
+    let verified = dcap_qvl::verify::verify(quote, &collateral, time)?;
+    let report = verified.report.as_td10().ok_or(DcapError::SgxNotSupported)?;
     Ok(ValidatedDcapQuote {
         mrtd: report.mr_td,
         rtmr0: report.rt_mr0,
