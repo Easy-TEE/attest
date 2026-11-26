@@ -28,11 +28,14 @@ pub trait Measurement {
 }
 
 /// Produces portable measurement from `.efi`, `.raw`, or `.tar.gz` image
+///
+/// This predictor rejects images containing `.ucode` or `.pcrpkey`
+/// because it does not reconstruct the combined initrd passed to Linux.
 #[cfg(feature = "image")]
 pub fn measure(uki_data: &[u8]) -> Result<PortableMeasurements, UkiError> {
     let uki = Uki::parse(uki_data)?;
     Ok(PortableMeasurements {
         azure: Some(azure::measure(&uki).finalize()),
-        dcap: dcap::measure(&uki),
+        dcap: dcap::measure(&uki)?,
     })
 }

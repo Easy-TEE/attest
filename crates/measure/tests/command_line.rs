@@ -32,5 +32,5 @@ fn measures_the_normalized_command_line() {
         "quiet loglevel=4\0".encode_utf16().flat_map(u16::to_le_bytes).collect();
     let expected: [u8; 48] = Sha384::digest(&load_options).into();
 
-    assert_eq!(dcap::measure(&uki).cmdline_hash, expected);
+    assert_eq!(dcap::measure(&uki).unwrap().cmdline_hash, expected);
 }

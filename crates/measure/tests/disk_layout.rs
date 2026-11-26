@@ -112,7 +112,7 @@ fn reads_uki_and_measures_the_declared_partition_array() {
         assert!(uki.has_rootfs);
         assert_eq!(uki.authenticode_sha384, bare.authenticode_sha384);
         assert_eq!(uki.disk_guid_hash, Some(expected_hash));
-        let hashes = dcap::measure(&uki);
+        let hashes = dcap::measure(&uki).unwrap();
         assert_eq!(hashes.gpt_disk_guid_hash, expected_hash);
         let registers = dcap::gcp::measure(&hashes);
         assert_eq!(registers.rtmr1.events()[2].digest, expected_hash);

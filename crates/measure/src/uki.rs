@@ -13,6 +13,10 @@ pub enum UkiError {
     Authenticode(#[from] PeOffsetError),
     #[error("disk image: {0}")]
     Disk(&'static str),
+    #[error(
+        "TDX measurement does not support UKI section {0}: it changes the initrd passed to Linux"
+    )]
+    UnsupportedTdxSection(&'static str),
 }
 
 /// Parsed UKI with pre-computed digests
@@ -41,7 +45,7 @@ pub struct UkiSection {
 
 /// Sections measured by systemd-stub, in order
 const UKI_MEASURED_SECTIONS: &[&str] =
-    &[".linux", ".osrel", ".cmdline", ".initrd", ".splash", ".dtb", ".uname", ".sbat", ".pcrkey"];
+    &[".linux", ".osrel", ".cmdline", ".initrd", ".splash", ".dtb", ".uname", ".sbat"];
 
 impl Uki {
     /// Parse a UKI file (`.efi`) or a disk image (`.raw` / `.tar.gz`)
