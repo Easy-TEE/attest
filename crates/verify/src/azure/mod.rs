@@ -9,6 +9,7 @@ use ak_certificate::verify_ak_cert_with_azure_roots;
 use ak_pubkey::{HclRuntimeClaims, RsaPubKey};
 use az_tdx_vtpm::{hcl, vtpm};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE as BASE64_URL_SAFE};
+use dcap_qvl::intel::{quote_ca, quote_fmspc};
 use error::AzureError;
 use openssl::pkey::PKey;
 use pccs::Pccs;
@@ -136,19 +137,19 @@ fn validate_embedded_tdx_quote(
     time: u64,
 ) -> Result<[u8; 64], DcapError> {
     let parsed = dcap_qvl::quote::Quote::parse(quote)?;
-    let collateral =
-        pccs.get_collateral_sync(hex::encode_upper(parsed.fmspc()?), parsed.ca()?, time)?;
-    dcap_qvl::verify::dangerous_verify_with_tcb_override(
+    let collateral = pccs.get_collateral_sync(
+        hex::encode_upper(quote_fmspc(&parsed)?),
+        quote_ca(&parsed)?.as_id_str(),
+        time,
+    )?;
+    let verified = dcap_qvl::verify::dangerous_verify_with_tcb_override(
         quote,
         &collateral,
         time,
         tcb_override_info,
     )?;
-    match parsed.report {
-        dcap_qvl::quote::Report::TD10(r) => Ok(r.report_data),
-        dcap_qvl::quote::Report::TD15(r) => Ok(r.base.report_data),
-        dcap_qvl::quote::Report::SgxEnclave(_) => Err(DcapError::SgxNotSupported),
-    }
+    let report = verified.report.as_td10().ok_or(DcapError::SgxNotSupported)?;
+    Ok(report.report_data)
 }
 
 fn tcb_override_info(mut tcb_info: dcap_qvl::tcb_info::TcbInfo) -> dcap_qvl::tcb_info::TcbInfo {

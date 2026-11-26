@@ -15,13 +15,13 @@ serde_json = { version = "1", optional = true }
 serde_with = { version = "3", features = ["hex"] }
 thiserror = "2"
 sha2 = "0.10"
-object = { version = "0.37", default-features = false, features = ["pe", "read"], optional = true }
-authenticode = { version = "0.5.0", features = ["object", "std"], optional = true }
+object = { version = "0.39", default-features = false, features = ["pe", "read"], optional = true }
+authenticode = { version = "0.6.0", features = ["object", "std"], optional = true }
 hex = "0.4"
 hex-literal = "1"
 crc32fast = { version = "1", optional = true }
 ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }
-rsa = { version = "0.9", optional = true }
+rsa = { version = "0.10", optional = true }
 x509-parser = { version = "0.18", features = ["verify"], optional = true }
 prost = { version = "0.14", optional = true }
 fatfs = { version = "0.3.6", default-features = false, features = ["std", "alloc"], optional = true }

@@ -50,15 +50,18 @@ const UKI_MEASURED_SECTIONS: &[&str] =
 impl Uki {
     /// Parse a UKI file (`.efi`) or a disk image (`.raw` / `.tar.gz`)
     /// Disk images are only needed when there's a separate rootfs
+    ///
+    /// Disk images must use 512-byte logical sectors and contain one EFI
+    /// system partition with the UKI at `EFI/BOOT/BOOTX64.EFI`.
     pub fn parse(data: &[u8]) -> Result<Self, UkiError> {
         if data.starts_with(&[0x1f, 0x8b]) {
             // GCP .tar.gz containing .raw disk image containing UKI
             Self::parse(&untar_disk_raw(data)?)
         } else if data.get(512..520) == Some(b"EFI PART".as_slice()) {
             // .raw disk image containing UKI
-            let disk_guid_hash =
-                crate::dcap::gpt::disk_guid_hash_from_header(data).map_err(UkiError::Disk)?;
-            Self::parse_pe(&extract_uki(data)?, Some(disk_guid_hash), true)
+            let gpt = crate::dcap::gpt::Gpt::parse(data).map_err(UkiError::Disk)?;
+            let esp = gpt.esp().map_err(UkiError::Disk)?;
+            Self::parse_pe(&extract_uki(esp)?, Some(gpt.disk_guid_hash()), true)
         } else {
             // Only UKI with no rootfs
             Self::parse_pe(data, None, false)
@@ -152,6 +155,17 @@ pub fn to_utf16le_null_terminated(input: &[u8]) -> Vec<u8> {
     out
 }
 
+// Match systemd-stub's mangle_stub_cmdline whitespace rules
+pub(crate) fn normalized_cmdline_utf16le(input: &[u8]) -> Vec<u8> {
+    let normalized: Vec<u8> = input
+        .iter()
+        .copied()
+        .take_while(|&b| b != 0)
+        .map(|b| if b <= b' ' || b == 0x7f { b' ' } else { b })
+        .collect();
+    to_utf16le_null_terminated(normalized.trim_ascii())
+}
+
 fn pe_authenticode_sha384(data: &[u8]) -> Result<[u8; 48], UkiError> {
     let pe = PeFile64::parse(data)?;
     let mut h = Sha384::new();
@@ -189,12 +203,8 @@ fn untar_disk_raw(targz: &[u8]) -> Result<Vec<u8>, UkiError> {
     Ok(raw)
 }
 
-// Extract UKI from a disk image
-fn extract_uki(disk: &[u8]) -> Result<Vec<u8>, UkiError> {
-    let entry = disk.get(1024..1152).ok_or(UkiError::Disk("no partition table"))?; // LBA 2
-    let start = u64::from_le_bytes(entry[32..40].try_into().unwrap()) as usize;
-    let end = u64::from_le_bytes(entry[40..48].try_into().unwrap()) as usize;
-    let esp = disk.get(start * 512..(end + 1) * 512).ok_or(UkiError::Disk("bad ESP bounds"))?;
+// Extract UKI from the EFI system partition.
+fn extract_uki(esp: &[u8]) -> Result<Vec<u8>, UkiError> {
     let fs = fatfs::FileSystem::new(Cursor::new(esp.to_vec()), fatfs::FsOptions::new())
         .map_err(|_| UkiError::Disk("invalid ESP filesystem"))?;
     let mut uki = Vec::new();
@@ -211,4 +221,30 @@ fn parse_stub_version(sdmagic: &[u8]) -> Option<u32> {
     let digits: String =
         text.split("systemd-stub ").nth(1)?.chars().take_while(char::is_ascii_digit).collect();
     digits.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_linux_command_line() {
+        for (input, expected) in [
+            (b"quiet".as_slice(), "quiet"),
+            (b"quiet\0", "quiet"),
+            (b" \tquiet\r\n", "quiet"),
+            (b"quiet\0ignored\0", "quiet"),
+            (b"\0ignored", ""),
+            (b"", ""),
+            (b" \t\r\n\x7f", ""),
+            (b"a\tb\nc\x01d\x7fe", "a b c d e"),
+            (b"a  \t b", "a    b"),
+            (b"key=\"a\tb\"", "key=\"a b\""),
+            ("\u{a0}caf\u{e9}\u{a0}".as_bytes(), "\u{a0}caf\u{e9}\u{a0}"),
+        ] {
+            let expected: Vec<u8> =
+                expected.encode_utf16().chain([0]).flat_map(u16::to_le_bytes).collect();
+            assert_eq!(normalized_cmdline_utf16le(input), expected, "input: {input:?}");
+        }
+    }
 }
